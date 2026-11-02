@@ -36,23 +36,84 @@ const iceServers = {
 const pc = new RTCPeerConnection(iceServers);
 
 // =============================================================================
-// GESTIÓN DE PISTAS MULTIMEDIA LOCALES
+// GESTIÓN DE PERIFÉRICOS Y PISTAS MULTIMEDIA LOCALES
+// Soporte adaptativo para PC de escritorio (sin cámara web) y celulares
 // =============================================================================
 
 /**
+ * Obtiene los dispositivos multimedia locales con degradación elegante:
+ * 1. Intenta obtener Cámara y Micrófono.
+ * 2. Si no hay cámara física (ej. PC de escritorio), obtiene solo el Micrófono.
+ * 3. Si no hay periféricos de entrada, continúa en modo receptor para ver/escuchar al par.
+ */
+async function acquireLocalMedia() {
+  if (localStream) return localStream;
+
+  // Intento 1: Cámara y Micrófono
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+    console.log("[WebRTC] Cámara y micrófono capturados exitosamente.");
+    if (localVideoComponent) localVideoComponent.srcObject = localStream;
+    hideNoCameraPlaceholder();
+    return localStream;
+  } catch (errVideo) {
+    console.warn("[WebRTC] No se encontró cámara (PC de escritorio sin webcam). Probando solo micrófono...", errVideo);
+  }
+
+  // Intento 2: Solo Micrófono (ideal para computadoras de escritorio)
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    console.log("[WebRTC] Micrófono capturado exitosamente (Modo solo audio).");
+    showNoCameraPlaceholder("Micrófono activo (PC sin cámara)");
+    return localStream;
+  } catch (errAudio) {
+    console.warn("[WebRTC] No se encontró micrófono o fue denegado:", errAudio);
+  }
+
+  // Intento 3: Modo solo receptor
+  showNoCameraPlaceholder("Modo escucha (Sin cámara ni micrófono)");
+  return null;
+}
+
+function showNoCameraPlaceholder(text) {
+  const indicator = document.getElementById('no-camera-indicator');
+  const label = document.getElementById('no-camera-label');
+  if (indicator) indicator.style.display = 'flex';
+  if (label && text) label.innerText = text;
+}
+
+function hideNoCameraPlaceholder() {
+  const indicator = document.getElementById('no-camera-indicator');
+  if (indicator) indicator.style.display = 'none';
+}
+
+/**
  * Asegura que las pistas de audio y video de la cámara local se hayan agregado al RTCPeerConnection.
- * Esto garantiza que tanto las Ofertas como las Respuestas incluyan los flujos de medios.
+ * Si la PC no tiene cámara, agrega un transceiver 'recvonly' para recibir el video del celular.
  */
 function ensureLocalTracksAdded() {
-  if (!localStream) return;
-  const senders = pc.getSenders();
-  localStream.getTracks().forEach((track) => {
-    const alreadyAdded = senders.some(s => s.track && s.track.id === track.id);
-    if (!alreadyAdded) {
-      pc.addTrack(track, localStream);
-      console.log(`[WebRTC] Pista local añadida al PeerConnection: ${track.kind}`);
+  if (localStream) {
+    const senders = pc.getSenders();
+    localStream.getTracks().forEach((track) => {
+      const alreadyAdded = senders.some(s => s.track && s.track.id === track.id);
+      if (!alreadyAdded) {
+        pc.addTrack(track, localStream);
+        console.log(`[WebRTC] Pista local añadida al PeerConnection: ${track.kind}`);
+      }
+    });
+  }
+
+  // Si no tenemos cámara para enviar, nos aseguramos de estar listos para RECIBIR video del par
+  const hasVideoSender = pc.getSenders().some(s => s.track && s.track.kind === 'video');
+  const hasVideoTransceiver = pc.getTransceivers().some(t => t.receiver && t.receiver.track && t.receiver.track.kind === 'video');
+  if (!hasVideoSender && !hasVideoTransceiver) {
+    try {
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      console.log("[WebRTC] Transceiver de video configurado en modo recvonly (listo para recibir la cámara del par).");
+    } catch (e) {
+      console.warn("[WebRTC] No se pudo agregar transceiver recvonly:", e);
     }
-  });
+  }
 }
 
 // =============================================================================
@@ -197,11 +258,8 @@ signaling.onmessage = async (data) => {
         console.log("[WebRTC] Oferta SDP recibida. Preparando respuesta...");
         updateHelperBanner("Conectando con tu compañera...");
 
-        // Nos aseguramos de tener la cámara local lista y de haber agregado las pistas
-        if (!localStream) {
-          localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-          localVideoComponent.srcObject = localStream;
-        }
+        // Nos aseguramos de tener los periféricos locales listos (cámara/mic o solo mic)
+        await acquireLocalMedia();
         ensureLocalTracksAdded();
 
         // Aplicamos la oferta remota
@@ -269,10 +327,17 @@ async function showVideoConference() {
   remoteVideoComponent = document.getElementById('remote-video');
 
   try {
-    localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-    localVideoComponent.srcObject = localStream;
+    // Captura adaptativa: Cámara + Mic o solo Mic si es PC de escritorio
+    await acquireLocalMedia();
     ensureLocalTracksAdded();
-    updateConnectionStatus("Cámara lista", "standby");
+
+    if (localStream && localStream.getVideoTracks().length > 0) {
+      updateConnectionStatus("Cámara lista", "standby");
+    } else if (localStream && localStream.getAudioTracks().length > 0) {
+      updateConnectionStatus("Micrófono listo (Sin cámara)", "standby");
+    } else {
+      updateConnectionStatus("Modo receptor (Sin periféricos)", "standby");
+    }
 
     // Conexión dinámica por WebSocket al servidor
     const isHttp = window.location.protocol.startsWith('http');
@@ -280,9 +345,8 @@ async function showVideoConference() {
     const wsHost = isHttp ? window.location.host : 'localhost:3000';
     signaling.connect(`${wsProtocol}//${wsHost}`);
   } catch (err) {
-    console.error("[WebRTC] Error al acceder a la cámara o micrófono:", err);
-    updateConnectionStatus("Permiso denegado", "error");
-    updateHelperBanner("Permiso de cámara/micrófono denegado en el navegador");
+    console.error("[WebRTC] Error durante la inicialización:", err);
+    updateConnectionStatus("Error al iniciar", "error");
   }
 }
 
@@ -297,11 +361,7 @@ async function start() {
     const btnStart = document.getElementById('btn-start-call');
     if (btnStart) btnStart.classList.remove('pulse-ready');
 
-    if (!localStream) {
-      localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-      localVideoComponent.srcObject = localStream;
-    }
-
+    await acquireLocalMedia();
     ensureLocalTracksAdded();
 
     // Creación manual de oferta para inicio inmediato garantizado
