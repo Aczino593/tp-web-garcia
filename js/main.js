@@ -23,19 +23,10 @@ let audioToneCtx = null;
 let toneInterval = null;
 let currentRoomPeers = 1;
 
-// Datos de usuario y sala
+// Identificadores de usuario y par destino seleccionado
 let myPeerId = "Yo";
+let currentTargetPeerId = null;
 let isVideoCallActive = false;
-
-// Configuración de restricciones multimedia
-const mediaConstraints = {
-  audio: true,
-  video: {
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
-    facingMode: "user" // Prioriza cámara frontal en celulares
-  }
-};
 
 // Servidores STUN públicos y redundantes para asegurar conectividad NAT Traversal
 const iceServers = {
@@ -61,10 +52,10 @@ function getPeerConnection() {
   console.log("[WebRTC] Creando nueva instancia RTCPeerConnection...");
   pc = new RTCPeerConnection(iceServers);
 
-  // 1. Detección y envío de candidatos ICE locales
+  // 1. Detección y envío de candidatos ICE locales hacia el par destino
   pc.onicecandidate = ({ candidate }) => {
     if (candidate && candidate.candidate) {
-      signaling.send({ candidate });
+      signaling.send({ candidate, target: currentTargetPeerId });
     }
   };
 
@@ -159,7 +150,7 @@ function hideUnmuteBanner() {
 }
 
 // =============================================================================
-// GESTIÓN DE PERIFÉRICOS CON VIDEO SINTÉTICO ACTIVO
+// GESTIÓN DE PERIFÉRICOS CON VIDEO SINTÉTICO ADAPTATIVO
 // =============================================================================
 
 function createFallbackVideoTrack() {
@@ -168,6 +159,9 @@ function createFallbackVideoTrack() {
   canvas.height = 480;
   const ctx = canvas.getContext('2d');
   let angle = 0;
+
+  const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const deviceLabel = isMobileDevice ? 'Celular (Sin Cámara)' : 'PC (Solo Micrófono)';
 
   function draw() {
     angle += 0.08;
@@ -197,7 +191,7 @@ function createFallbackVideoTrack() {
     ctx.fillStyle = '#f8fafc';
     ctx.font = 'bold 20px Inter, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('PC (Solo Micrófono)', 320, 350);
+    ctx.fillText(deviceLabel, 320, 350);
   }
 
   draw();
@@ -209,12 +203,25 @@ function createFallbackVideoTrack() {
 }
 
 async function acquireLocalMedia() {
-  if (localStream) return localStream;
+  if (localStream && localStream.active && localStream.getVideoTracks().length > 0) {
+    return localStream;
+  }
 
-  // Intento 1: Cámara web física y Micrófono
+  // Intento 1: Cámara web con cancelación de eco (ideal para celulares y portátiles)
   try {
-    localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-    console.log("[WebRTC] Cámara web y micrófono obtenidos con éxito.");
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
+      video: {
+        facingMode: "user",
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    });
+    console.log("[WebRTC] Cámara web y micrófono obtenidos con éxito (Intento 1).");
     if (localVideoComponent) {
       localVideoComponent.srcObject = localStream;
       localVideoComponent.muted = true;
@@ -224,17 +231,45 @@ async function acquireLocalMedia() {
     hideNoCameraPlaceholder();
     return localStream;
   } catch (errVideo) {
-    console.warn("[WebRTC] Sin cámara física. Activando micrófono y video sintético...", errVideo);
+    console.warn("[WebRTC] Intento 1 falló (puede ser resolución de celular en vertical):", errVideo);
   }
 
-  // Intento 2: Micrófono real + Video sintético (PC de escritorio)
+  // Intento 2: Cámara básica sin restricciones dimensionales (indispensable para celulares)
   try {
-    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true
+      },
+      video: true
+    });
+    console.log("[WebRTC] Cámara y micrófono obtenidos con video básico (Intento 2).");
+    if (localVideoComponent) {
+      localVideoComponent.srcObject = localStream;
+      localVideoComponent.muted = true;
+      localVideoComponent.playsInline = true;
+      localVideoComponent.play().catch(e => console.warn(e));
+    }
+    hideNoCameraPlaceholder();
+    return localStream;
+  } catch (errBasic) {
+    console.warn("[WebRTC] Intento 2 falló (dispositivo sin cámara física):", errBasic);
+  }
+
+  // Intento 3: Micrófono real + Video sintético (PC de escritorio sin cámara web física)
+  try {
+    const audioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true
+      },
+      video: false
+    });
     const fallbackVideo = createFallbackVideoTrack();
     audioStream.addTrack(fallbackVideo);
 
     localStream = audioStream;
-    console.log("[WebRTC] Micrófono y pista de video adaptativa listos.");
+    console.log("[WebRTC] PC de escritorio sin cámara: Micrófono real y video sintético adaptativo listos.");
 
     if (localVideoComponent) {
       localVideoComponent.srcObject = localStream;
@@ -363,6 +398,112 @@ const signaling = {
 };
 
 // =============================================================================
+// GESTIÓN DE CONTACTOS Y DISPOSITIVOS EN EL PANEL LATERAL
+// =============================================================================
+
+function updateContactsList(peersList, totalPeers) {
+  const chatList = document.getElementById('chat-list');
+  const headerStatus = document.getElementById('chat-header-status');
+  const chatHeaderName = document.getElementById('chat-header-name');
+  if (!chatList) return;
+
+  const otherPeers = (peersList || []).filter(p => p.peerId !== myPeerId);
+
+  if (otherPeers.length === 0) {
+    currentTargetPeerId = null;
+    chatList.innerHTML = `
+      <div class="chat-item active" id="peer-chat-item">
+        <div class="avatar contact-avatar">
+          <svg class="icon-svg" viewBox="0 0 24 24">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <span class="online-indicator offline"></span>
+        </div>
+        <div class="chat-item-content">
+          <div class="chat-item-top">
+            <h3>Esperando compañero...</h3>
+            <span class="chat-time">--:--</span>
+          </div>
+          <div class="chat-item-bottom">
+            <p>Conecta tu celular a la sala</p>
+          </div>
+        </div>
+      </div>
+    `;
+    if (chatHeaderName) chatHeaderName.innerText = "Compañero";
+    if (headerStatus) {
+      headerStatus.innerText = "Esperando que se una...";
+      headerStatus.classList.remove('online');
+    }
+    return;
+  }
+
+  // Si no hay seleccionado o el seleccionado ya no existe, seleccionar el primero
+  if (!currentTargetPeerId || !otherPeers.some(p => p.peerId === currentTargetPeerId)) {
+    currentTargetPeerId = otherPeers[0].peerId;
+  }
+
+  chatList.innerHTML = "";
+  otherPeers.forEach((p) => {
+    const isSelected = p.peerId === currentTargetPeerId;
+    const isPhone = (p.deviceType === 'Celular') || p.peerId.includes('Celular');
+
+    const item = document.createElement('div');
+    item.className = `chat-item ${isSelected ? 'active' : ''}`;
+    item.onclick = () => selectContact(p.peerId);
+
+    // Icono SVG según dispositivo
+    const deviceIconSvg = isPhone
+      ? `<svg class="icon-svg" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>`
+      : `<svg class="icon-svg" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`;
+
+    item.innerHTML = `
+      <div class="avatar contact-avatar">
+        ${deviceIconSvg}
+        <span class="online-indicator"></span>
+      </div>
+      <div class="chat-item-content">
+        <div class="chat-item-top">
+          <h3>${p.peerId}</h3>
+          <span class="chat-time">En línea</span>
+        </div>
+        <div class="chat-item-bottom">
+          <p>Toca para chatear o llamar</p>
+        </div>
+      </div>
+    `;
+    chatList.appendChild(item);
+  });
+
+  const selectedPeerObj = otherPeers.find(p => p.peerId === currentTargetPeerId);
+  if (selectedPeerObj) {
+    if (chatHeaderName) chatHeaderName.innerText = selectedPeerObj.peerId;
+    if (headerStatus) {
+      headerStatus.innerText = "En línea";
+      headerStatus.classList.add('online');
+    }
+  }
+}
+
+function selectContact(peerId) {
+  currentTargetPeerId = peerId;
+  openChatView();
+  const chatHeaderName = document.getElementById('chat-header-name');
+  if (chatHeaderName) chatHeaderName.innerText = peerId;
+
+  const items = document.querySelectorAll('.chat-item');
+  items.forEach(el => {
+    const h3 = el.querySelector('h3');
+    if (h3 && h3.innerText === peerId) {
+      el.classList.add('active');
+    } else {
+      el.classList.remove('active');
+    }
+  });
+}
+
+// =============================================================================
 // MOTOR DE CHAT EN TIEMPO REAL ESTILO WHATSAPP
 // =============================================================================
 
@@ -371,9 +512,6 @@ function formatCurrentTime() {
   return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-/**
- * Enviar mensaje de chat
- */
 function handleSendMessage(event) {
   if (event) event.preventDefault();
 
@@ -387,11 +525,12 @@ function handleSendMessage(event) {
   // 1. Agregar burbuja a mi pantalla (verde, a la derecha)
   appendChatMessage(text, timeStr, true);
 
-  // 2. Enviar por WebSocket al otro par
+  // 2. Enviar por WebSocket al par destino
   signaling.send({
     type: 'chat-message',
     text: text,
     sender: myPeerId,
+    target: currentTargetPeerId,
     time: timeStr
   });
 
@@ -403,9 +542,6 @@ function handleSendMessage(event) {
   input.focus();
 }
 
-/**
- * Agrega una burbuja de mensaje al contenedor
- */
 function appendChatMessage(text, timeStr, isMine) {
   const container = document.getElementById('messages-container');
   if (!container) return;
@@ -425,7 +561,6 @@ function appendChatMessage(text, timeStr, isMine) {
   meta.appendChild(time);
 
   if (isMine) {
-    // Doble tilde azul de WhatsApp
     const check = document.createElement('span');
     check.innerHTML = `
       <svg class="check-icon" viewBox="0 0 16 16" fill="currentColor">
@@ -437,8 +572,6 @@ function appendChatMessage(text, timeStr, isMine) {
 
   bubble.appendChild(meta);
   container.appendChild(bubble);
-
-  // Scroll automático hacia abajo
   container.scrollTop = container.scrollHeight;
 }
 
@@ -509,7 +642,6 @@ function playIncomingTone() {
     function ring() {
       if (!audioToneCtx || audioToneCtx.state === 'closed') return;
       const t = audioToneCtx.currentTime;
-      // Primer tono (440 Hz)
       const osc1 = audioToneCtx.createOscillator();
       const gain1 = audioToneCtx.createGain();
       osc1.type = 'sine';
@@ -521,7 +653,6 @@ function playIncomingTone() {
       osc1.start(t);
       osc1.stop(t + 0.35);
 
-      // Segundo tono (554 Hz)
       const osc2 = audioToneCtx.createOscillator();
       const gain2 = audioToneCtx.createGain();
       osc2.type = 'sine';
@@ -603,21 +734,15 @@ function initiateCall() {
   showOutgoingModal();
   updateConnectionStatus("Llamando...", "active");
 
-  const subtitle = document.getElementById('call-modal-subtitle');
-  if (currentRoomPeers < 2) {
-    if (subtitle) subtitle.innerText = "Esperando que tu compañero se conecte a la sala...";
-  } else {
-    if (subtitle) subtitle.innerText = "Esperando que atiendan...";
-  }
-
   // Pre-cargar periféricos locales de forma asíncrona
   acquireLocalMedia().catch(e => console.warn(e));
 
-  signaling.send({ type: 'call-request' });
+  signaling.send({ type: 'call-request', target: currentTargetPeerId });
 }
 
-function handleIncomingCallRequest() {
-  showIncomingModal();
+function handleIncomingCallRequest(sender, senderDevice) {
+  currentTargetPeerId = sender || currentTargetPeerId;
+  showIncomingModal(sender, senderDevice);
   updateConnectionStatus("Llamada entrante...", "active");
 }
 
@@ -628,22 +753,22 @@ async function acceptIncomingCall() {
 
   await acquireLocalMedia();
   ensureLocalTracksAdded();
-  signaling.send({ type: 'call-accepted' });
+  signaling.send({ type: 'call-accepted', target: currentTargetPeerId });
 }
 
 function rejectIncomingCall() {
   closeCallModal();
-  signaling.send({ type: 'call-rejected' });
+  signaling.send({ type: 'call-rejected', target: currentTargetPeerId });
   updateConnectionStatus("Llamada rechazada", "standby");
 }
 
 function cancelOutgoingCall() {
   closeCallModal();
-  signaling.send({ type: 'call-cancelled' });
+  signaling.send({ type: 'call-cancelled', target: currentTargetPeerId });
   updateConnectionStatus("Llamada cancelada", "standby");
 }
 
-function showIncomingModal() {
+function showIncomingModal(sender, senderDevice) {
   playIncomingTone();
   const modal = document.getElementById('call-modal');
   const title = document.getElementById('call-modal-title');
@@ -652,7 +777,9 @@ function showIncomingModal() {
   const outgoing = document.getElementById('outgoing-actions');
 
   if (title) title.innerText = "Llamada entrante";
-  if (subtitle) subtitle.innerText = "Videollamada WebRTC P2P";
+  if (subtitle) {
+    subtitle.innerText = sender ? `De ${sender}` : "Videollamada WebRTC P2P";
+  }
   if (incoming) incoming.style.display = 'flex';
   if (outgoing) outgoing.style.display = 'none';
   if (modal) modal.style.display = 'flex';
@@ -667,6 +794,15 @@ function showOutgoingModal() {
   const outgoing = document.getElementById('outgoing-actions');
 
   if (title) title.innerText = "Llamando...";
+  if (subtitle) {
+    if (currentTargetPeerId) {
+      subtitle.innerText = `Llamando a ${currentTargetPeerId}...`;
+    } else if (currentRoomPeers < 2) {
+      subtitle.innerText = "Esperando que tu compañero se conecte a la sala...";
+    } else {
+      subtitle.innerText = "Esperando que atiendan...";
+    }
+  }
   if (incoming) incoming.style.display = 'none';
   if (outgoing) outgoing.style.display = 'flex';
   if (modal) modal.style.display = 'flex';
@@ -700,9 +836,6 @@ function closeVideoOverlay() {
   if (restoreBtn) restoreBtn.style.display = 'none';
 }
 
-/**
- * Minimiza la videollamada a una ventanita flotante para poder ver el chat mientras hablas
- */
 function toggleMinimizeVideo() {
   const overlay = document.getElementById('video-overlay');
   const restoreBtn = document.getElementById('btn-restore-video');
@@ -722,7 +855,7 @@ function toggleMinimizeVideo() {
 // =============================================================================
 signaling.onmessage = async (data) => {
   try {
-    const { desc, candidate, type, peerId, totalPeers, text, time } = data;
+    const { desc, candidate, type, peerId, totalPeers, peers, text, time, sender, senderDevice } = data;
 
     // 1. Mensaje de bienvenida del servidor
     if (type === 'welcome') {
@@ -733,31 +866,10 @@ signaling.onmessage = async (data) => {
       return;
     }
 
-    // 2. Estado de la sala (usuarios conectados)
+    // 2. Estado de la sala (usuarios conectados y lista de pares)
     if (type === 'room-status') {
       currentRoomPeers = totalPeers || 1;
-      const isOnline = currentRoomPeers >= 2;
-      const onlineDot = document.getElementById('peer-online-dot');
-      const headerStatus = document.getElementById('chat-header-status');
-      const contactTitle = document.getElementById('peer-contact-title');
-
-      if (isOnline) {
-        if (onlineDot) onlineDot.classList.remove('offline');
-        if (headerStatus) {
-          headerStatus.innerText = "En línea";
-          headerStatus.classList.add('online');
-        }
-        if (contactTitle) contactTitle.innerText = "Compañero (En línea)";
-        updateLastMessagePreview("En línea - Toca para chatear o llamar");
-      } else {
-        if (onlineDot) onlineDot.classList.add('offline');
-        if (headerStatus) {
-          headerStatus.innerText = "Esperando que se una...";
-          headerStatus.classList.remove('online');
-        }
-        if (contactTitle) contactTitle.innerText = "Compañero";
-        updateLastMessagePreview("Esperando conexión...");
-      }
+      updateContactsList(peers, currentRoomPeers);
       return;
     }
 
@@ -780,13 +892,15 @@ signaling.onmessage = async (data) => {
 
     // 4. Solicitud de llamada entrante
     if (type === 'call-request') {
-      handleIncomingCallRequest();
+      currentTargetPeerId = sender || currentTargetPeerId;
+      handleIncomingCallRequest(sender, senderDevice);
       return;
     }
 
     // 5. El par aceptó la llamada
     if (type === 'call-accepted') {
-      console.log("[Signaling] El par aceptó la llamada. Generando Oferta SDP...");
+      if (sender) currentTargetPeerId = sender;
+      console.log(`[Signaling] El par ${currentTargetPeerId || ''} aceptó la llamada. Generando Oferta SDP...`);
       closeCallModal();
       openVideoOverlay();
       updateConnectionStatus("Conectando...", "active");
@@ -797,7 +911,7 @@ signaling.onmessage = async (data) => {
 
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
-      signaling.send({ desc: peer.localDescription });
+      signaling.send({ desc: peer.localDescription, target: currentTargetPeerId });
       return;
     }
 
@@ -805,7 +919,7 @@ signaling.onmessage = async (data) => {
     if (type === 'call-rejected') {
       resetCallState();
       updateConnectionStatus("Llamada rechazada", "standby");
-      appendSystemMessage("Llamada rechazada por el compañero.");
+      appendSystemMessage(`Llamada rechazada por ${sender || 'el compañero'}.`);
       return;
     }
 
@@ -819,7 +933,7 @@ signaling.onmessage = async (data) => {
     if (type === 'peer-disconnected') {
       updateConnectionStatus("Par desconectado", "standby");
       resetCallState();
-      appendSystemMessage("El compañero se ha desconectado.");
+      appendSystemMessage(`${data.peerId || 'El compañero'} se ha desconectado.`);
       return;
     }
 
@@ -828,7 +942,8 @@ signaling.onmessage = async (data) => {
       const peer = getPeerConnection();
 
       if (desc.type === 'offer') {
-        console.log("[WebRTC] Oferta SDP recibida. Generando Respuesta...");
+        if (sender) currentTargetPeerId = sender;
+        console.log(`[WebRTC] Oferta SDP recibida de ${currentTargetPeerId || 'par'}. Generando Respuesta...`);
         await acquireLocalMedia();
         ensureLocalTracksAdded();
 
@@ -837,7 +952,7 @@ signaling.onmessage = async (data) => {
 
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
-        signaling.send({ desc: peer.localDescription });
+        signaling.send({ desc: peer.localDescription, target: currentTargetPeerId });
         console.log("[WebRTC] Respuesta SDP enviada.");
 
       } else if (desc.type === 'answer') {
@@ -906,7 +1021,7 @@ async function showVideoConference() {
 
 function hangUp() {
   resetCallState();
-  signaling.send({ type: 'call-ended' });
+  signaling.send({ type: 'call-ended', target: currentTargetPeerId });
   updateConnectionStatus("Llamada finalizada", "standby");
   appendSystemMessage("Llamada finalizada.");
 }

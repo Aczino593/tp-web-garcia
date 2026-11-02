@@ -74,12 +74,22 @@ server.on('close', () => {
   clearInterval(pingInterval);
 });
 
-// Notifica a todos los clientes la cantidad actual de usuarios conectados
+// Notifica a todos los clientes la cantidad actual de usuarios conectados y sus dispositivos
 function broadcastRoomStatus() {
-  const count = wss.clients.size;
+  const peers = [];
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN && client.peerId) {
+      peers.push({
+        peerId: client.peerId,
+        deviceType: client.deviceType || 'Dispositivo'
+      });
+    }
+  });
+
   const payload = JSON.stringify({
     type: 'room-status',
-    totalPeers: count
+    totalPeers: wss.clients.size,
+    peers: peers
   });
 
   wss.clients.forEach((client) => {
@@ -91,8 +101,12 @@ function broadcastRoomStatus() {
 
 wss.on('connection', (ws, req) => {
   peerCounter++;
-  const peerId = `Par-${peerCounter}`;
+  const userAgent = req.headers['user-agent'] || '';
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
+  const deviceType = isMobile ? 'Celular' : 'PC';
+  const peerId = `Par-${peerCounter} (${deviceType})`;
   ws.peerId = peerId;
+  ws.deviceType = deviceType;
 
   const clientIp = req.socket.remoteAddress;
   console.log(`\n[Signaling] [+] Nuevo par conectado: ${peerId} (IP: ${clientIp})`);
@@ -102,6 +116,7 @@ wss.on('connection', (ws, req) => {
   ws.send(JSON.stringify({
     type: 'welcome',
     peerId: peerId,
+    deviceType: deviceType,
     totalPeers: wss.clients.size
   }));
 
@@ -112,21 +127,25 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data.toString());
+      message.sender = ws.peerId;
+      message.senderDevice = ws.deviceType;
 
       if (message.desc) {
-        console.log(`[Signaling] [SDP ${message.desc.type.toUpperCase()}] Retransmitiendo desde ${ws.peerId} hacia el otro par.`);
+        console.log(`[Signaling] [SDP ${message.desc.type.toUpperCase()}] Retransmitiendo desde ${ws.peerId} hacia ${message.target || 'todos'}.`);
       } else if (message.candidate) {
         console.log(`[Signaling] [Candidato ICE] Retransmitiendo desde ${ws.peerId}.`);
       } else if (message.type) {
-        console.log(`[Signaling] [Evento: ${message.type}] Retransmitiendo desde ${ws.peerId}.`);
+        console.log(`[Signaling] [Evento: ${message.type}] Retransmitiendo desde ${ws.peerId} hacia ${message.target || 'todos'}.`);
       }
 
-      // Reenviar a los demás pares conectados
+      // Reenviar al par destino específico o a todos los demás pares
       let forwardedCount = 0;
       wss.clients.forEach((client) => {
         if (client !== ws && client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(message));
-          forwardedCount++;
+          if (!message.target || client.peerId === message.target) {
+            client.send(JSON.stringify(message));
+            forwardedCount++;
+          }
         }
       });
 
