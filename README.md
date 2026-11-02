@@ -1,11 +1,11 @@
 # Trabajo Práctico: Videollamada WebRTC Peer-to-Peer (P2P)
 
 **Institución:** Escuela de Educación Técnica Nº 3139 “Gral. Martín M. de Güemes”  
-**Ubicación:** Caseros Nº 1615 – Salta Capital  
+**Dirección:** Caseros N° 1615 – Telf.: (0387) 4320294 – Salta Capital  
 **Materia / Especialidad:** Redes y Telecomunicaciones / Computación  
 **Proyecto:** `tp-web-garcia`  
-**Alumno / Integrantes:** García y equipo  
-**Fecha:** Noviembre de 2026  
+**Alumno / Integrantes:** Alvarez Franco y Avalos Stefania  
+**Fecha:** 2/11/26  
 
 ---
 
