@@ -163,52 +163,6 @@ main.workspace {
   justify-content: center;
 }
 
-/* Barra de guía / paso a paso en la parte superior del contenedor */
-.helper-banner {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 90%;
-  z-index: 25;
-  background: rgba(15, 23, 42, 0.9);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  padding: 8px 16px;
-  border-radius: 24px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  transition: all 0.3s ease;
-}
-
-.helper-text {
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: #e2e8f0;
-}
-
-.btn-copy-link {
-  background: rgba(59, 130, 246, 0.2);
-  border: 1px solid rgba(59, 130, 246, 0.4);
-  color: #60a5fa;
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-  transition: background 0.2s;
-}
-
-.btn-copy-link:hover {
-  background: rgba(59, 130, 246, 0.35);
-}
-
 /* Estado de espera en el video remoto */
 .remote-placeholder {
   position: absolute;
@@ -456,22 +410,6 @@ main.workspace {
 
   .video-position {
     border-radius: 12px;
-  }
-
-  .helper-banner {
-    top: 8px;
-    max-width: 94%;
-    padding: 6px 12px;
-    gap: 8px;
-  }
-
-  .helper-text {
-    font-size: 0.72rem;
-  }
-
-  .btn-copy-link {
-    font-size: 0.7rem;
-    padding: 3px 8px;
   }
 
   /* En celulares, la cámara local va arriba a la derecha (estilo WhatsApp)

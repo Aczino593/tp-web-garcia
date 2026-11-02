@@ -43,18 +43,6 @@
     <!-- Contenedor principal requerido por la consigna del TP -->
     <div id="video-chat-container" class="video-position">
       
-      <!-- Cartel de guía paso a paso y botón para compartir enlace -->
-      <div id="helper-banner" class="helper-banner">
-        <span id="helper-text" class="helper-text">Paso 1: Comparte este enlace con tu compañera</span>
-        <button id="btn-copy-link" class="btn-copy-link" onclick="copyMeetingLink()" title="Copiar enlace para tu compañera">
-          <svg class="icon-svg" style="width: 13px; height: 13px;" viewBox="0 0 24 24">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-          </svg>
-          <span id="btn-copy-label">Copiar enlace</span>
-        </button>
-      </div>
-
       <!-- Estado de espera para el video remoto -->
       <div id="remote-placeholder" class="remote-placeholder">
         <div class="avatar-icon">
@@ -63,7 +51,7 @@
             <circle cx="12" cy="7" r="4"/>
           </svg>
         </div>
-        <p id="placeholder-text">Esperando que tu compañera abra el enlace...</p>
+        <p id="placeholder-text">Esperando conexión...</p>
       </div>
 
       <!-- Video remoto principal con autoplay -->

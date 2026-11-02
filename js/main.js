@@ -2,7 +2,7 @@
  * =============================================================================
  * TRABAJO PRÁCTICO WEBRTC - E.E.T. Nº 3139 “GRAL. MARTÍN M. DE GÜEMES”
  * Archivo: js/main.js
- * Descripción: Implementación robusta y adaptativa de la API WebRTC para videollamadas P2P
+ * Descripción: Implementación robusta de la API WebRTC para videollamadas P2P
  * =============================================================================
  */
 
@@ -14,7 +14,7 @@ var localStream = null;
 // Cola para almacenar candidatos ICE remotos recibidos antes de fijar la descripción remota
 let iceCandidatesQueue = [];
 
-// Configuración de restricciones multimedia (audio y video en alta definición)
+// Configuración de restricciones multimedia
 const mediaConstraints = {
   audio: true,
   video: {
@@ -24,7 +24,7 @@ const mediaConstraints = {
   }
 };
 
-// Servidores STUN públicos y gratuitos provistos por Google para NAT Traversal
+// Servidores STUN públicos provistos por Google para NAT Traversal
 const iceServers = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -32,8 +32,43 @@ const iceServers = {
   ]
 };
 
-// Instancia principal de RTCPeerConnection
-const pc = new RTCPeerConnection(iceServers);
+// Variable para la instancia RTCPeerConnection (se inicializa y recrea dinámicamente)
+let pc = null;
+
+/**
+ * Obtiene o inicializa la conexión RTCPeerConnection activa.
+ * Si la conexión previa fue cerrada, crea una nueva limpia para evitar el error 'closed'.
+ */
+function getPeerConnection() {
+  if (pc && pc.signalingState !== 'closed') {
+    return pc;
+  }
+
+  console.log("[WebRTC] Creando nueva instancia de RTCPeerConnection...");
+  pc = new RTCPeerConnection(iceServers);
+
+  // 1. Envío de candidatos ICE locales
+  pc.onicecandidate = ({ candidate }) => {
+    if (candidate) {
+      console.log("[WebRTC] Candidato ICE local generado. Enviando...");
+      signaling.send({ candidate });
+    }
+  };
+
+  // 2. Recepción de pistas de audio y video remotas
+  pc.ontrack = (event) => {
+    console.log("[WebRTC] Pista remota recibida.");
+    if (remoteVideoComponent.srcObject) return;
+    remoteVideoComponent.srcObject = event.streams[0];
+
+    const placeholder = document.getElementById('remote-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+
+    updateConnectionStatus("En videollamada", "active");
+  };
+
+  return pc;
+}
 
 // =============================================================================
 // GESTIÓN DE PERIFÉRICOS Y PISTAS MULTIMEDIA LOCALES
@@ -41,10 +76,9 @@ const pc = new RTCPeerConnection(iceServers);
 // =============================================================================
 
 /**
- * Obtiene los dispositivos multimedia locales con degradación elegante:
- * 1. Intenta obtener Cámara y Micrófono.
- * 2. Si no hay cámara física (ej. PC de escritorio), obtiene solo el Micrófono.
- * 3. Si no hay periféricos de entrada, continúa en modo receptor para ver/escuchar al par.
+ * Obtiene los dispositivos locales con fallback:
+ * 1. Intenta Cámara y Micrófono.
+ * 2. Si la PC de escritorio no tiene cámara web, obtiene solo el Micrófono.
  */
 async function acquireLocalMedia() {
   if (localStream) return localStream;
@@ -52,26 +86,25 @@ async function acquireLocalMedia() {
   // Intento 1: Cámara y Micrófono
   try {
     localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-    console.log("[WebRTC] Cámara y micrófono capturados exitosamente.");
+    console.log("[WebRTC] Cámara y micrófono capturados.");
     if (localVideoComponent) localVideoComponent.srcObject = localStream;
     hideNoCameraPlaceholder();
     return localStream;
   } catch (errVideo) {
-    console.warn("[WebRTC] No se encontró cámara (PC de escritorio sin webcam). Probando solo micrófono...", errVideo);
+    console.warn("[WebRTC] Sin cámara física. Intentando solo micrófono...", errVideo);
   }
 
-  // Intento 2: Solo Micrófono (ideal para computadoras de escritorio)
+  // Intento 2: Solo Micrófono (ideal para PCs de escritorio)
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    console.log("[WebRTC] Micrófono capturado exitosamente (Modo solo audio).");
+    console.log("[WebRTC] Micrófono capturado (Modo solo audio).");
     showNoCameraPlaceholder("Micrófono activo (PC sin cámara)");
     return localStream;
   } catch (errAudio) {
-    console.warn("[WebRTC] No se encontró micrófono o fue denegado:", errAudio);
+    console.warn("[WebRTC] Sin micrófono o permiso denegado:", errAudio);
   }
 
-  // Intento 3: Modo solo receptor
-  showNoCameraPlaceholder("Modo escucha (Sin cámara ni micrófono)");
+  showNoCameraPlaceholder("Sin cámara ni micrófono");
   return null;
 }
 
@@ -88,36 +121,38 @@ function hideNoCameraPlaceholder() {
 }
 
 /**
- * Asegura que las pistas de audio y video de la cámara local se hayan agregado al RTCPeerConnection.
- * Si la PC no tiene cámara, agrega un transceiver 'recvonly' para recibir el video del celular.
+ * Agrega las pistas multimedia locales al RTCPeerConnection activo.
+ * Si la PC no tiene cámara, agrega un transceiver 'recvonly' para recibir el video del par.
  */
 function ensureLocalTracksAdded() {
+  const peer = getPeerConnection();
+
   if (localStream) {
-    const senders = pc.getSenders();
+    const senders = peer.getSenders();
     localStream.getTracks().forEach((track) => {
       const alreadyAdded = senders.some(s => s.track && s.track.id === track.id);
       if (!alreadyAdded) {
-        pc.addTrack(track, localStream);
-        console.log(`[WebRTC] Pista local añadida al PeerConnection: ${track.kind}`);
+        peer.addTrack(track, localStream);
+        console.log(`[WebRTC] Pista local agregada: ${track.kind}`);
       }
     });
   }
 
-  // Si no tenemos cámara para enviar, nos aseguramos de estar listos para RECIBIR video del par
-  const hasVideoSender = pc.getSenders().some(s => s.track && s.track.kind === 'video');
-  const hasVideoTransceiver = pc.getTransceivers().some(t => t.receiver && t.receiver.track && t.receiver.track.kind === 'video');
+  // Si no tenemos cámara para enviar, nos preparamos para RECIBIR video del par
+  const hasVideoSender = peer.getSenders().some(s => s.track && s.track.kind === 'video');
+  const hasVideoTransceiver = peer.getTransceivers().some(t => t.receiver && t.receiver.track && t.receiver.track.kind === 'video');
   if (!hasVideoSender && !hasVideoTransceiver) {
     try {
-      pc.addTransceiver('video', { direction: 'recvonly' });
-      console.log("[WebRTC] Transceiver de video configurado en modo recvonly (listo para recibir la cámara del par).");
+      peer.addTransceiver('video', { direction: 'recvonly' });
+      console.log("[WebRTC] Transceiver video configurado en modo recvonly.");
     } catch (e) {
-      console.warn("[WebRTC] No se pudo agregar transceiver recvonly:", e);
+      console.warn("[WebRTC] Transceiver error:", e);
     }
   }
 }
 
 // =============================================================================
-// CANAL DE SEÑALIZACIÓN (Signaling Channel con WebSockets)
+// CANAL DE SEÑALIZACIÓN WEBSOCKET
 // =============================================================================
 const signaling = {
   ws: null,
@@ -127,17 +162,16 @@ const signaling = {
 
     this.ws.onopen = () => {
       updateConnectionStatus("Servidor conectado", "active");
-      console.log("[Signaling] Conectado exitosamente al servidor WebSocket.");
+      console.log("[Signaling] Conectado exitosamente.");
     };
 
     this.ws.onclose = () => {
       updateConnectionStatus("Servidor desconectado", "error");
-      updateHelperBanner("Servidor desconectado. Revisa la terminal.");
       console.log("[Signaling] Conexión cerrada.");
     };
 
     this.ws.onerror = (err) => {
-      console.error("[Signaling] Error en la conexión WebSocket:", err);
+      console.error("[Signaling] Error WebSocket:", err);
       updateConnectionStatus("Error de conexión", "error");
     };
 
@@ -148,7 +182,7 @@ const signaling = {
           await this.onmessage(data);
         }
       } catch (err) {
-        console.error("[Signaling] Error al procesar mensaje JSON entrante:", err);
+        console.error("[Signaling] Error al procesar JSON:", err);
       }
     };
   },
@@ -157,7 +191,7 @@ const signaling = {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
     } else {
-      console.warn("[Signaling] Servidor no disponible. No se pudo enviar:", data);
+      console.warn("[Signaling] Servidor no disponible:", data);
     }
   },
 
@@ -165,138 +199,71 @@ const signaling = {
 };
 
 // =============================================================================
-// EVENTOS DE RTCPeerConnection
-// =============================================================================
-
-// 1. Detección y envío de candidatos ICE locales
-pc.onicecandidate = ({ candidate }) => {
-  if (candidate) {
-    console.log("[WebRTC] Candidato ICE local generado. Enviando al par remoto...");
-    signaling.send({ candidate });
-  }
-};
-
-// 2. Negociación requerida (onnegotiationneeded)
-pc.onnegotiationneeded = async () => {
-  try {
-    console.log("[WebRTC] Negociación requerida: Creando oferta SDP...");
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    console.log("[WebRTC] Oferta local guardada. Enviando al par remoto...");
-    signaling.send({ desc: pc.localDescription });
-  } catch (err) {
-    console.error("[WebRTC] Error durante la creación de la oferta SDP:", err);
-  }
-};
-
-// 3. Recepción de flujo multimedia remoto (ontrack)
-pc.ontrack = (event) => {
-  console.log("[WebRTC] Flujo multimedia remoto recibido del par.");
-  if (remoteVideoComponent.srcObject) return;
-  remoteVideoComponent.srcObject = event.streams[0];
-
-  // Ocultar pantalla de espera
-  const placeholder = document.getElementById('remote-placeholder');
-  if (placeholder) placeholder.style.display = 'none';
-
-  updateConnectionStatus("En videollamada P2P", "active");
-  updateHelperBanner("Videollamada activa en tiempo real");
-};
-
-// =============================================================================
-// PROCESAMIENTO DE MENSAJES RECIBIDOS VÍA SEÑALIZACIÓN
+// PROCESAMIENTO DE MENSAJES DE SEÑALIZACIÓN
 // =============================================================================
 signaling.onmessage = async (data) => {
   try {
-    const { desc, candidate, type, peerId, totalPeers } = data;
+    const { desc, candidate, type, peerId } = data;
 
-    // 1. Mensaje de bienvenida del servidor
+    // 1. Bienvenida o desconexión
     if (type === 'welcome') {
-      console.log(`[Signaling] Asignado como: ${peerId}. Total en sala: ${totalPeers}`);
+      console.log(`[Signaling] Asignado como: ${peerId}`);
       updateConnectionStatus(`Conectado (${peerId})`, "active");
-      if (totalPeers < 2) {
-        updateHelperBanner("Paso 1: Comparte este enlace con tu compañera");
-        updatePlaceholderText("Esperando que tu compañera abra el enlace...");
-      }
       return;
     }
 
-    // 2. Actualización del estado de la sala (número de personas conectadas)
-    if (type === 'room-status') {
-      console.log(`[Signaling] Pares activos en sala: ${totalPeers}`);
-      const btnStart = document.getElementById('btn-start-call');
-
-      if (totalPeers >= 2) {
-        updateHelperBanner("Tu compañera está conectada. Presiona 'Llamar'");
-        updatePlaceholderText("Compañera en sala. Presiona 'Llamar' para conectar.");
-        if (btnStart) btnStart.classList.add('pulse-ready');
-      } else {
-        updateHelperBanner("Paso 1: Comparte este enlace con tu compañera");
-        updatePlaceholderText("Esperando que tu compañera abra el enlace...");
-        if (btnStart) btnStart.classList.remove('pulse-ready');
-      }
-      return;
-    }
-
-    // 3. Notificación de desconexión del par remoto
     if (type === 'peer-disconnected') {
-      console.log(`[Signaling] El par remoto ${peerId} se ha desconectado.`);
+      console.log(`[Signaling] El par ${peerId} se desconectó.`);
       updateConnectionStatus("Par desconectado", "standby");
-      updateHelperBanner("Tu compañera se ha desconectado");
 
       if (remoteVideoComponent) remoteVideoComponent.srcObject = null;
       const placeholder = document.getElementById('remote-placeholder');
       if (placeholder) placeholder.style.display = 'flex';
-      updatePlaceholderText("Llamada finalizada por el par.");
+
+      // Resetear la conexión para que quede lista para una próxima llamada
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
       return;
     }
 
-    // 4. Recepción de Descriptores de Sesión (SDP)
+    // 2. Recepción de SDP (Oferta o Respuesta)
     if (desc) {
-      // Caso A: Se recibe una Oferta SDP del par
-      if (desc.type === 'offer') {
-        console.log("[WebRTC] Oferta SDP recibida. Preparando respuesta...");
-        updateHelperBanner("Conectando con tu compañera...");
+      const peer = getPeerConnection();
 
-        // Nos aseguramos de tener los periféricos locales listos (cámara/mic o solo mic)
+      if (desc.type === 'offer') {
+        console.log("[WebRTC] Oferta SDP recibida. Procesando...");
+        updateConnectionStatus("Conectando...", "active");
+
         await acquireLocalMedia();
         ensureLocalTracksAdded();
 
-        // Aplicamos la oferta remota
-        await pc.setRemoteDescription(desc);
-
-        // Vaciamos los candidatos ICE que hayan llegado antes del SDP
+        await peer.setRemoteDescription(desc);
         await drainIceQueue();
 
-        // Generamos la respuesta SDP (Answer) y la enviamos
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        console.log("[WebRTC] Respuesta SDP generada y enviada al par.");
-        signaling.send({ desc: pc.localDescription });
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        signaling.send({ desc: peer.localDescription });
+        console.log("[WebRTC] Respuesta SDP enviada.");
 
-      // Caso B: Se recibe la Respuesta SDP a nuestra oferta previa
       } else if (desc.type === 'answer') {
-        console.log("[WebRTC] Respuesta SDP recibida. Estableciendo como descripción remota...");
-        await pc.setRemoteDescription(desc);
-
-        // Vaciamos los candidatos ICE acumulados
+        console.log("[WebRTC] Respuesta SDP recibida.");
+        await peer.setRemoteDescription(desc);
         await drainIceQueue();
-      } else {
-        console.warn("[WebRTC] Tipo de SDP no reconocido:", desc.type);
       }
 
-    // 5. Recepción de Candidato ICE del par remoto
+    // 3. Recepción de Candidato ICE
     } else if (candidate) {
-      if (pc.remoteDescription && pc.remoteDescription.type) {
-        console.log("[WebRTC] Candidato ICE aplicado directamente.");
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      const peer = getPeerConnection();
+      if (peer.remoteDescription && peer.remoteDescription.type) {
+        await peer.addIceCandidate(new RTCIceCandidate(candidate));
       } else {
-        console.log("[WebRTC] Candidato ICE guardado en cola (esperando remoteDescription)...");
         iceCandidatesQueue.push(candidate);
       }
     }
   } catch (err) {
-    console.error("[WebRTC] Error al procesar señalización entrante:", err);
+    console.error("[WebRTC] Error al procesar señalización:", err);
   }
 };
 
@@ -304,13 +271,13 @@ signaling.onmessage = async (data) => {
  * Aplica los candidatos ICE acumulados en la cola tras fijar la descripción remota
  */
 async function drainIceQueue() {
+  const peer = getPeerConnection();
   while (iceCandidatesQueue.length > 0) {
     const candidate = iceCandidatesQueue.shift();
     try {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      console.log("[WebRTC] Candidato ICE en cola aplicado exitosamente.");
+      await peer.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (e) {
-      console.warn("[WebRTC] Error aplicando candidato ICE en cola:", e);
+      console.warn("[WebRTC] Error aplicando candidato en cola:", e);
     }
   }
 }
@@ -320,14 +287,13 @@ async function drainIceQueue() {
 // =============================================================================
 
 /**
- * Inicializa la cámara web local y se conecta al servidor de señalización
+ * Inicializa la cámara o micrófono y conecta con el servidor de señalización
  */
 async function showVideoConference() {
   localVideoComponent = document.getElementById('local-video');
   remoteVideoComponent = document.getElementById('remote-video');
 
   try {
-    // Captura adaptativa: Cámara + Mic o solo Mic si es PC de escritorio
     await acquireLocalMedia();
     ensureLocalTracksAdded();
 
@@ -336,10 +302,10 @@ async function showVideoConference() {
     } else if (localStream && localStream.getAudioTracks().length > 0) {
       updateConnectionStatus("Micrófono listo (Sin cámara)", "standby");
     } else {
-      updateConnectionStatus("Modo receptor (Sin periféricos)", "standby");
+      updateConnectionStatus("Modo receptor", "standby");
     }
 
-    // Conexión dinámica por WebSocket al servidor
+    // Conexión dinámica por WebSocket
     const isHttp = window.location.protocol.startsWith('http');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = isHttp ? window.location.host : 'localhost:3000';
@@ -351,46 +317,43 @@ async function showVideoConference() {
 }
 
 /**
- * Inicia la videollamada generando y enviando la oferta SDP al par remoto
+ * Inicia la llamada creando la oferta SDP
  */
 async function start() {
   try {
     updateConnectionStatus("Llamando...", "active");
-    updateHelperBanner("Llamando a tu compañera...");
-
-    const btnStart = document.getElementById('btn-start-call');
-    if (btnStart) btnStart.classList.remove('pulse-ready');
 
     await acquireLocalMedia();
+    const peer = getPeerConnection();
     ensureLocalTracksAdded();
 
-    // Creación manual de oferta para inicio inmediato garantizado
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    signaling.send({ desc: pc.localDescription });
-    console.log("[WebRTC] Llamada iniciada. Oferta SDP enviada.");
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    signaling.send({ desc: peer.localDescription });
+    console.log("[WebRTC] Llamada iniciada. Oferta enviada.");
   } catch (err) {
     console.error("[WebRTC] Error al iniciar la llamada:", err);
-    updateHelperBanner("Error al llamar: " + err.message);
+    updateConnectionStatus("Error al llamar", "error");
   }
 }
 
 /**
- * Finaliza la videollamada, cierra la conexión WebRTC y apaga la cámara
+ * Finaliza la videollamada y resetea la conexión para permitir llamadas futuras
  */
 function hangUp() {
-  pc.close();
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
+  if (pc) {
+    pc.close();
+    pc = null;
   }
-  localVideoComponent.srcObject = null;
-  remoteVideoComponent.srcObject = null;
+
+  if (remoteVideoComponent) {
+    remoteVideoComponent.srcObject = null;
+  }
 
   const placeholder = document.getElementById('remote-placeholder');
   if (placeholder) placeholder.style.display = 'flex';
 
   updateConnectionStatus("Llamada finalizada", "standby");
-  updateHelperBanner("Llamada finalizada. Recarga la página para volver a iniciar.");
 }
 
 /**
@@ -432,62 +395,7 @@ function toggleFullScreen() {
 }
 
 /**
- * Copia el enlace actual al portapapeles para compartirlo fácilmente
- */
-function copyMeetingLink() {
-  const url = window.location.href;
-  const label = document.getElementById('btn-copy-label');
-
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(() => {
-      showCopiedSuccess(label);
-    }).catch(() => fallbackCopy(url, label));
-  } else {
-    fallbackCopy(url, label);
-  }
-}
-
-function fallbackCopy(text, label) {
-  const input = document.createElement('input');
-  input.value = text;
-  document.body.appendChild(input);
-  input.select();
-  try {
-    document.execCommand('copy');
-    showCopiedSuccess(label);
-  } catch (err) {
-    console.error("Error al copiar enlace:", err);
-  }
-  document.body.removeChild(input);
-}
-
-function showCopiedSuccess(label) {
-  if (!label) return;
-  const original = label.innerText;
-  label.innerText = "¡Enlace copiado!";
-  setTimeout(() => {
-    label.innerText = original;
-  }, 2500);
-}
-
-/**
- * Actualiza el texto de la barra de guía superior
- */
-function updateHelperBanner(text) {
-  const bannerText = document.getElementById('helper-text');
-  if (bannerText) bannerText.innerText = text;
-}
-
-/**
- * Actualiza el texto del placeholder remoto
- */
-function updatePlaceholderText(text) {
-  const el = document.getElementById('placeholder-text');
-  if (el) el.innerText = text;
-}
-
-/**
- * Actualiza el indicador visual y texto del estado de la conexión
+ * Actualiza la insignia de estado en la barra superior
  */
 function updateConnectionStatus(message, state) {
   const text = document.getElementById('status-text');
