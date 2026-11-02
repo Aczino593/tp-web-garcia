@@ -61,6 +61,19 @@ const wss = new WebSocketServer({ server });
 
 let peerCounter = 0;
 
+// Heartbeat cada 25 segundos para mantener vivas las conexiones en celulares
+const pingInterval = setInterval(() => {
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.ping();
+    }
+  });
+}, 25000);
+
+server.on('close', () => {
+  clearInterval(pingInterval);
+});
+
 // Notifica a todos los clientes la cantidad actual de usuarios conectados
 function broadcastRoomStatus() {
   const count = wss.clients.size;
@@ -104,6 +117,8 @@ wss.on('connection', (ws, req) => {
         console.log(`[Signaling] [SDP ${message.desc.type.toUpperCase()}] Retransmitiendo desde ${ws.peerId} hacia el otro par.`);
       } else if (message.candidate) {
         console.log(`[Signaling] [Candidato ICE] Retransmitiendo desde ${ws.peerId}.`);
+      } else if (message.type) {
+        console.log(`[Signaling] [Evento: ${message.type}] Retransmitiendo desde ${ws.peerId}.`);
       }
 
       // Reenviar a los demás pares conectados

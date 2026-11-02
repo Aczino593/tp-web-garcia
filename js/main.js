@@ -295,27 +295,47 @@ function ensureLocalTracksAdded() {
 }
 
 // =============================================================================
-// CANAL DE SEÑALIZACIÓN WEBSOCKET
+// CANAL DE SEÑALIZACIÓN WEBSOCKET CON AUTORRECONEXIÓN Y KEEPALIVE
 // =============================================================================
 const signaling = {
   ws: null,
+  reconnectTimer: null,
+  serverUrl: null,
 
   connect: function(url) {
-    this.ws = new WebSocket(url);
+    if (url) this.serverUrl = url;
+    const targetUrl = this.serverUrl;
+    if (!targetUrl) return;
+
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    try {
+      this.ws = new WebSocket(targetUrl);
+    } catch (err) {
+      console.warn("[Signaling] Fallo al crear WebSocket:", err);
+      this.scheduleReconnect();
+      return;
+    }
 
     this.ws.onopen = () => {
       updateConnectionStatus("Conectado", "active");
       console.log("[Signaling] WebSocket conectado.");
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
     };
 
     this.ws.onclose = () => {
-      updateConnectionStatus("Desconectado", "error");
-      console.log("[Signaling] WebSocket cerrado.");
+      updateConnectionStatus("Reconectando...", "standby");
+      console.log("[Signaling] WebSocket cerrado. Reintentando...");
+      this.scheduleReconnect();
     };
 
     this.ws.onerror = (err) => {
-      console.error("[Signaling] Error WebSocket:", err);
-      updateConnectionStatus("Error servidor", "error");
+      console.warn("[Signaling] Error WebSocket:", err);
     };
 
     this.ws.onmessage = async (message) => {
@@ -330,11 +350,27 @@ const signaling = {
     };
   },
 
+  scheduleReconnect: function() {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, 1500);
+  },
+
   send: function(data) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
+      return true;
     } else {
-      console.warn("[Signaling] Canal cerrado. No enviado:", data);
+      console.warn("[Signaling] Canal no listo. Reconectando y reintentando...", data);
+      this.connect();
+      setTimeout(() => {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify(data));
+        }
+      }, 800);
+      return false;
     }
   },
 
@@ -437,19 +473,18 @@ signaling.onmessage = async (data) => {
     }
 
     if (type === 'call-rejected') {
-      closeCallModal();
+      resetCallState();
       updateConnectionStatus("Llamada rechazada", "standby");
       return;
     }
 
-    if (type === 'call-cancelled') {
-      closeCallModal();
-      updateConnectionStatus("Llamada cancelada", "standby");
+    if (type === 'call-cancelled' || type === 'call-ended') {
+      resetCallState();
+      updateConnectionStatus("Llamada finalizada", "standby");
       return;
     }
 
     if (type === 'peer-disconnected') {
-      closeCallModal();
       updateConnectionStatus("Par desconectado", "standby");
       resetCallState();
       return;
@@ -526,21 +561,26 @@ async function showVideoConference() {
 }
 
 function hangUp() {
-  closeCallModal();
   resetCallState();
-  signaling.send({ type: 'call-cancelled' });
+  signaling.send({ type: 'call-ended' });
   updateConnectionStatus("Llamada finalizada", "standby");
 }
 
 function resetCallState() {
   hideUnmuteBanner();
+  closeCallModal();
 
   if (pc) {
-    pc.close();
+    try {
+      pc.close();
+    } catch (e) {}
     pc = null;
   }
 
+  // Limpiar cola de candidatos ICE acumulados para la próxima llamada
+  iceCandidatesQueue = [];
   remoteMediaStream = null;
+
   if (remoteVideoComponent) {
     remoteVideoComponent.srcObject = null;
   }
