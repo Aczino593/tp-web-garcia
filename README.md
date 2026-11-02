@@ -205,6 +205,11 @@ Muestra el registro de eventos en la terminal de Node.js durante el intercambio 
 
 ![Consola del Servidor de Señalización](./docs/captura-servidor.png)
 
+#### 3. Interfaz de Chat en Tiempo Real y Lista de Contactos
+Muestra el panel de mensajería punto a punto estilo WhatsApp con intercambio de texto en vivo y detección dinámica de dispositivos:
+
+![Interfaz de Chat en Tiempo Real](./docs/captura-chat.png)
+
 ---
 
 ## 5. Guía de Ejecución y Pruebas
