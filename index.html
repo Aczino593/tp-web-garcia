@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>Sistema de Videollamada WebRTC - E.E.T. Nº 3139</title>
+  <title>WhatsApp WebRTC - E.E.T. Nº 3139</title>
   
   <!-- Tipografía Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,7 +19,6 @@
   <header class="app-header">
     <div class="brand-container">
       <div class="school-badge" title="E.E.T. Nº 3139">
-        <!-- Ícono institucional: Escudo / Red -->
         <svg class="icon-svg" viewBox="0 0 24 24">
           <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/>
           <path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>
@@ -27,23 +26,163 @@
       </div>
       <div class="brand-text">
         <h1>E.E.T. Nº 3139 “Gral. Martín M. de Güemes”</h1>
-        <span>Comunicación WebRTC Peer-to-Peer</span>
+        <span>WebRTC P2P Messenger & Video</span>
       </div>
     </div>
 
-    <!-- Indicador de conexión en tiempo real -->
+    <!-- Indicador de conexión global -->
     <div class="connection-badge">
       <span id="status-dot" class="status-dot"></span>
-      <span id="status-text">Inicializando...</span>
+      <span id="status-text">Conectando...</span>
     </div>
   </header>
 
-  <!-- Espacio principal de videoconferencia -->
-  <main class="workspace">
+  <!-- Contenedor principal estilo WhatsApp Web / Mobile -->
+  <div class="whatsapp-app" id="whatsapp-app">
+    
+    <!-- ======================================================================
+         1. PANEL LATERAL IZQUIERDO (Lista de Chats / Contactos)
+         ====================================================================== -->
+    <aside class="sidebar-panel" id="sidebar-panel">
+      <!-- Encabezado de mi perfil -->
+      <div class="sidebar-header">
+        <div class="user-profile">
+          <div class="avatar my-avatar">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span class="online-indicator"></span>
+          </div>
+          <div class="user-info">
+            <span class="user-label">Mi usuario:</span>
+            <span id="my-peer-name" class="user-name">Yo (Conectando...)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barra de sala / info -->
+      <div class="search-bar-container">
+        <div class="search-input-wrapper">
+          <svg class="icon-svg" style="width: 16px; height: 16px; color: #8696a0;" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <span class="room-tag">Sala E.E.T. Nº 3139 P2P</span>
+        </div>
+      </div>
+
+      <!-- Lista de conversaciones activas -->
+      <div class="chat-list" id="chat-list">
+        <!-- Contacto activo del par conectado -->
+        <div class="chat-item active" id="peer-chat-item" onclick="openChatView()">
+          <div class="avatar contact-avatar">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span id="peer-online-dot" class="online-indicator offline"></span>
+          </div>
+          <div class="chat-item-content">
+            <div class="chat-item-top">
+              <h3 id="peer-contact-title">Compañero</h3>
+              <span id="peer-last-time" class="chat-time">--:--</span>
+            </div>
+            <div class="chat-item-bottom">
+              <p id="peer-last-preview">Esperando conexión...</p>
+              <span id="unread-badge" class="unread-badge" style="display: none;">1</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ======================================================================
+         2. ÁREA DE CHAT DERECHA (Conversación WhatsApp)
+         ====================================================================== -->
+    <main class="chat-panel" id="chat-panel">
+      <!-- Encabezado de la conversación -->
+      <div class="chat-header">
+        <!-- Botón volver para celulares -->
+        <button class="btn-icon mobile-back-btn" onclick="backToSidebar()" title="Volver a chats">
+          <svg class="icon-svg" viewBox="0 0 24 24">
+            <line x1="19" y1="12" x2="5" y2="12"/>
+            <polyline points="12 19 5 12 12 5"/>
+          </svg>
+        </button>
+
+        <div class="chat-header-info">
+          <div class="avatar contact-avatar-sm">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </div>
+          <div class="chat-title-group">
+            <h2 id="chat-header-name">Compañero</h2>
+            <span id="chat-header-status" class="chat-header-status">Esperando conexión...</span>
+          </div>
+        </div>
+
+        <!-- Botones de llamada estilo WhatsApp -->
+        <div class="chat-header-actions">
+          <!-- Botón Videollamada -->
+          <button class="btn-icon btn-action-call" onclick="initiateCall()" title="Iniciar videollamada">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <polygon points="23 7 16 12 23 17 23 7"/>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            </svg>
+          </button>
+
+          <!-- Botón Llamada de voz -->
+          <button class="btn-icon btn-action-call" onclick="initiateCall()" title="Iniciar llamada de voz">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Área de mensajes scrolleable -->
+      <div class="messages-container" id="messages-container">
+        <!-- Separador de fecha -->
+        <div class="date-badge"><span>Hoy</span></div>
+
+        <div class="system-message">
+          <span>Los mensajes y videollamadas están protegidos por el protocolo punto a punto WebRTC.</span>
+        </div>
+      </div>
+
+      <!-- Barra de entrada de texto inferior -->
+      <div class="chat-input-bar">
+        <form id="chat-form" onsubmit="handleSendMessage(event)">
+          <input
+            type="text"
+            id="chat-input"
+            class="chat-input"
+            placeholder="Escribe un mensaje aquí..."
+            autocomplete="off"
+          />
+          <button type="submit" class="btn-send" id="btn-send" title="Enviar mensaje">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </form>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- ======================================================================
+       3. PANTALLA / OVERLAY DE VIDEOLLAMADA (Contenedor WebRTC del TP)
+       ====================================================================== -->
+  <div id="video-overlay" class="video-overlay" style="display: none;">
     <!-- Contenedor principal requerido por la consigna del TP -->
     <div id="video-chat-container" class="video-position">
       
-      <!-- Botón para desbloquear audio si el navegador lo bloqueó por autoplay -->
+      <!-- Botón para desbloquear audio en navegadores con autoplay estricto -->
       <button id="unmute-banner" class="unmute-banner" onclick="unmuteRemoteAudio()" style="display: none;" title="Activar sonido">
         <svg class="icon-svg" viewBox="0 0 24 24">
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
@@ -60,7 +199,7 @@
             <circle cx="12" cy="7" r="4"/>
           </svg>
         </div>
-        <p id="placeholder-text">Esperando conexión...</p>
+        <p id="placeholder-text">Esperando video...</p>
       </div>
 
       <!-- Video remoto principal con autoplay y playsinline -->
@@ -70,7 +209,7 @@
       <div class="local-video-wrapper">
         <video id="local-video" autoplay="autoplay" muted playsinline webkit-playsinline></video>
         <div id="no-camera-indicator" class="no-camera-indicator" style="display: none;">
-          <svg class="icon-svg" style="width: 26px; height: 26px; color: #10b981;" viewBox="0 0 24 24">
+          <svg class="icon-svg" style="width: 24px; height: 24px; color: #10b981;" viewBox="0 0 24 24">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
             <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
             <line x1="12" y1="19" x2="12" y2="23"/>
@@ -78,12 +217,12 @@
           </svg>
           <span id="no-camera-label">Sin cámara</span>
         </div>
-        <span class="local-video-label">Cámara local</span>
+        <span class="local-video-label">Tú</span>
       </div>
 
-      <!-- Barra flotante de controles con íconos vectoriales -->
+      <!-- Barra de controles flotante durante la videollamada -->
       <div class="controls-bar">
-        <!-- Botón Silenciar Micrófono -->
+        <!-- Silenciar micrófono -->
         <button id="btn-audio" class="btn-control icon-only" onclick="toggleAudio()" title="Silenciar / Activar micrófono">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -93,7 +232,7 @@
           </svg>
         </button>
 
-        <!-- Botón Apagar / Encender Cámara -->
+        <!-- Apagar cámara -->
         <button id="btn-video" class="btn-control icon-only" onclick="toggleVideo()" title="Activar / Desactivar cámara">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <polygon points="23 7 16 12 23 17 23 7"/>
@@ -101,24 +240,23 @@
           </svg>
         </button>
 
-        <!-- Botón Iniciar Llamada (Dispara el flujo estilo WhatsApp) -->
-        <button id="btn-start-call" class="btn-control btn-start" onclick="initiateCall()" title="Llamar al otro par">
+        <!-- Minimizar a chat (para poder mandar mensajes mientras hablas) -->
+        <button class="btn-control icon-only" onclick="toggleMinimizeVideo()" title="Ver chat mientras hablas">
           <svg class="icon-svg" viewBox="0 0 24 24">
-            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
           </svg>
-          <span id="btn-start-label">Llamar</span>
         </button>
 
-        <!-- Botón Colgar / Desconectar -->
+        <!-- Colgar llamada -->
         <button class="btn-control btn-hangup" onclick="hangUp()" title="Finalizar llamada">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
             <line x1="1" y1="1" x2="23" y2="23"/>
           </svg>
-          <span id="btn-hangup-label">Colgar</span>
+          <span>Colgar</span>
         </button>
 
-        <!-- Botón Pantalla Completa -->
+        <!-- Pantalla completa -->
         <button class="btn-control icon-only" onclick="toggleFullScreen()" title="Pantalla completa">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
@@ -127,9 +265,20 @@
       </div>
 
     </div>
-  </main>
+  </div>
 
-  <!-- Modal estilo WhatsApp para llamada entrante y saliente -->
+  <!-- Botón flotante para restaurar video si está minimizado en modo chat -->
+  <button id="btn-restore-video" class="btn-restore-video" onclick="toggleMinimizeVideo()" style="display: none;">
+    <svg class="icon-svg" viewBox="0 0 24 24">
+      <polygon points="23 7 16 12 23 17 23 7"/>
+      <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+    </svg>
+    <span>Llamada en curso (Toca para volver)</span>
+  </button>
+
+  <!-- ======================================================================
+       4. MODAL DE LLAMADA TIPO WHATSAPP (Entrante / Saliente)
+       ====================================================================== -->
   <div id="call-modal" class="call-modal-overlay" style="display: none;">
     <div class="call-modal-card">
       <div class="call-modal-avatar">
@@ -141,16 +290,16 @@
       <h2 id="call-modal-title">Llamada entrante</h2>
       <p id="call-modal-subtitle">Videollamada WebRTC P2P</p>
       
-      <!-- Opciones cuando te llaman (Atender / Rechazar) -->
+      <!-- Acciones de llamada entrante -->
       <div id="incoming-actions" class="call-modal-actions">
-        <button class="btn-modal-action btn-accept" onclick="acceptIncomingCall()" title="Atender llamada">
+        <button class="btn-modal-action btn-accept" onclick="acceptIncomingCall()" title="Atender">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
           </svg>
           <span>Atender</span>
         </button>
 
-        <button class="btn-modal-action btn-reject" onclick="rejectIncomingCall()" title="Rechazar llamada">
+        <button class="btn-modal-action btn-reject" onclick="rejectIncomingCall()" title="Rechazar">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
             <line x1="1" y1="1" x2="23" y2="23"/>
@@ -159,9 +308,9 @@
         </button>
       </div>
 
-      <!-- Opción cuando tú estás llamando (Cancelar) -->
+      <!-- Acciones de llamada saliente -->
       <div id="outgoing-actions" class="call-modal-actions" style="display: none;">
-        <button class="btn-modal-action btn-reject" onclick="cancelOutgoingCall()" title="Cancelar llamada">
+        <button class="btn-modal-action btn-reject" onclick="cancelOutgoingCall()" title="Cancelar">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
             <line x1="1" y1="1" x2="23" y2="23"/>
@@ -172,7 +321,7 @@
     </div>
   </div>
 
-  <!-- Lógica WebRTC externa -->
+  <!-- Lógica WebRTC y Chat -->
   <script src="js/main.js"></script>
 </body>
 </html>

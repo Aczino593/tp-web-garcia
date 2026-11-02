@@ -54,11 +54,14 @@ tp-web-garcia/
    * `pc.onnegotiationneeded`: Detecta cuándo se añaden o modifican pistas multimedia locales. Genera automáticamente una oferta SDP (`pc.createOffer()`), la establece como descripción local (`pc.setLocalDescription()`) y la transmite al par remoto.
    * `pc.ontrack`: Se dispara al arribar las pistas de audio y video del par remoto, vinculando el flujo entrante (`event.streams[0]`) a `remoteVideoComponent.srcObject`.
 
-5. **Controles de Usuario Integrados:**
-   * Silenciar/activar micrófono dinámicamente (`toggleAudio()`).
-   * Activar/desactivar la cámara web (`toggleVideo()`).
-   * Visualización a pantalla completa (`toggleFullScreen()`).
-   * Insignia de estado de red con animación luminosa para monitorear la conexión.
+5. **Interfaz de Usuario Estilo WhatsApp (Web & Móvil) y Controles:**
+   * **Panel Lateral y Chat en Tiempo Real:** Lista de contactos activos con indicador de estado (en línea/esperando), historial de mensajes con formato de doble tilde y timestamp.
+   * **Modales de Llamada Estilo WhatsApp:** Ventana emergente para atender, rechazar o cancelar llamadas entrantes y salientes, con señal acústica sintetizada (*Web Audio API*).
+   * **Silenciar/Activar Micrófono dinámicamente (	oggleAudio()):** Control individual de la pista de audio local.
+   * **Activar/Desactivar Cámara web (	oggleVideo()):** Control individual de la pista de video local con modo de compatibilidad para equipos sin cámara.
+   * **Modo Picture-in-Picture / Minimizar a Chat (	oggleMinimizeVideo()):** Permite continuar chateando por texto mientras la videollamada sigue activa en una ventana flotante.
+   * **Visualización a pantalla completa (	oggleFullScreen()):** Aprovecha toda la pantalla del dispositivo.
+   * **Diseño Responsivo Completo:** Adaptación automática fluida entre versión de escritorio (WhatsApp Web) y móvil (WhatsApp App).
 
 ---
 
