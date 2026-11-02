@@ -629,14 +629,15 @@ header.app-header {
   justify-content: center;
 }
 
-/* Video remoto (par conectado): fondo completo */
+/* Video remoto (par conectado): centrado natural sin zoom exagerado */
 #remote-video {
   position: relative;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  background-color: #020617;
+  object-fit: contain;
+  background-color: #0b141a;
   z-index: 2;
+  transition: object-fit 0.25s ease;
 }
 
 /* Placeholder cuando aún no se recibe video */

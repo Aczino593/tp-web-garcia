@@ -77,24 +77,27 @@ function getPeerConnection() {
     }
   };
 
-  // 3. Recepción de pistas de audio y video remotas
+  // 3. Recepción de pistas de audio y video remotas de forma desacoplada
   pc.ontrack = (event) => {
     console.log("[WebRTC] Pista remota recibida:", event.track.kind);
 
-    if (!remoteMediaStream) {
-      remoteMediaStream = new MediaStream();
+    if (event.track.kind === 'video') {
+      if (!remoteMediaStream) {
+        remoteMediaStream = new MediaStream();
+      }
+      const existing = remoteMediaStream.getVideoTracks()[0];
+      if (existing) remoteMediaStream.removeTrack(existing);
+      remoteMediaStream.addTrack(event.track);
+
+      setupRemoteVideoElement(remoteMediaStream);
+
+      const placeholder = document.getElementById('remote-placeholder');
+      if (placeholder) placeholder.style.display = 'none';
+
+    } else if (event.track.kind === 'audio') {
+      // Elemento de audio dedicado para garantizar que el navegador lo reproduzca
+      setupRemoteAudioElement(event.track);
     }
-
-    const existing = remoteMediaStream.getTracks().find(t => t.kind === event.track.kind);
-    if (existing) {
-      remoteMediaStream.removeTrack(existing);
-    }
-    remoteMediaStream.addTrack(event.track);
-
-    setupRemoteVideoElement(remoteMediaStream);
-
-    const placeholder = document.getElementById('remote-placeholder');
-    if (placeholder) placeholder.style.display = 'none';
 
     closeCallModal();
     openVideoOverlay();
@@ -105,38 +108,68 @@ function getPeerConnection() {
 }
 
 /**
- * Configura la reproducción remota manejando de forma segura las restricciones de autoplay
+ * Configura la reproducción del audio remoto usando un elemento <audio> dedicado
+ */
+function setupRemoteAudioElement(audioTrack) {
+  let remoteAudio = document.getElementById('remote-audio');
+  if (!remoteAudio) {
+    remoteAudio = document.createElement('audio');
+    remoteAudio.id = 'remote-audio';
+    remoteAudio.autoplay = true;
+    remoteAudio.playsInline = true;
+    document.body.appendChild(remoteAudio);
+  }
+
+  remoteAudio.srcObject = new MediaStream([audioTrack]);
+  remoteAudio.muted = false;
+  remoteAudio.volume = 1.0;
+
+  remoteAudio.play().then(() => {
+    console.log("[WebRTC] Audio remoto reproduciéndose activamente.");
+    hideUnmuteBanner();
+  }).catch((err) => {
+    console.warn("[WebRTC] Autoplay bloqueó audio remoto. Esperando clic:", err);
+    showUnmuteBanner();
+    document.addEventListener('click', unmuteRemoteAudio, { once: true });
+  });
+}
+
+/**
+ * Configura la reproducción remota de video
  */
 function setupRemoteVideoElement(stream) {
   if (!remoteVideoComponent) return;
 
-  remoteVideoComponent.srcObject = stream;
+  if (remoteVideoComponent.srcObject !== stream) {
+    remoteVideoComponent.srcObject = stream;
+  }
   remoteVideoComponent.playsInline = true;
   remoteVideoComponent.setAttribute('playsinline', '');
   remoteVideoComponent.setAttribute('webkit-playsinline', '');
 
-  remoteVideoComponent.muted = false;
   remoteVideoComponent.play().then(() => {
-    console.log("[WebRTC] Reproducción remota activa con sonido.");
-    hideUnmuteBanner();
+    console.log("[WebRTC] Video remoto reproduciéndose.");
   }).catch((err) => {
-    console.warn("[WebRTC] Autoplay con audio restringido. Silenciando para mostrar video...", err);
+    console.warn("[WebRTC] Video autoplay con restricción, activando mudo visual:", err);
     remoteVideoComponent.muted = true;
-    remoteVideoComponent.play().then(() => {
-      console.log("[WebRTC] Video remoto visible. Mostrando botón de audio.");
-      showUnmuteBanner();
-      document.addEventListener('click', unmuteRemoteAudio, { once: true });
-    }).catch(e => console.error("[WebRTC] Error fatal:", e));
+    remoteVideoComponent.play().catch(e => console.warn(e));
   });
 }
 
 function unmuteRemoteAudio() {
+  const remoteAudio = document.getElementById('remote-audio');
+  if (remoteAudio) {
+    remoteAudio.muted = false;
+    remoteAudio.volume = 1.0;
+    remoteAudio.play().catch(e => console.warn(e));
+  }
   if (remoteVideoComponent) {
     remoteVideoComponent.muted = false;
+    remoteVideoComponent.volume = 1.0;
     remoteVideoComponent.play().catch(e => console.warn(e));
   }
   hideUnmuteBanner();
-  console.log("[WebRTC] Audio remoto activado.");
+  console.log("[WebRTC] Audio remoto activado por el usuario.");
 }
 
 function showUnmuteBanner() {
@@ -147,6 +180,22 @@ function showUnmuteBanner() {
 function hideUnmuteBanner() {
   const banner = document.getElementById('unmute-banner');
   if (banner) banner.style.display = 'none';
+}
+
+/**
+ * Alterna el encuadre del video remoto entre contain (ajustado natural) y cover (pantalla completa)
+ */
+function toggleVideoAspect() {
+  const vid = document.getElementById('remote-video');
+  if (!vid) return;
+  const currentFit = vid.style.objectFit || window.getComputedStyle(vid).objectFit;
+  if (currentFit === 'cover') {
+    vid.style.objectFit = 'contain';
+    console.log("[UI] Encuadre de video cambiado a: contain (ajustado)");
+  } else {
+    vid.style.objectFit = 'cover';
+    console.log("[UI] Encuadre de video cambiado a: cover (lleno)");
+  }
 }
 
 // =============================================================================
@@ -202,54 +251,61 @@ function createFallbackVideoTrack() {
   return stream.getVideoTracks()[0];
 }
 
+/**
+ * Conecta EXCLUSIVAMENTE la pista de video al elemento miniatura local.
+ * De esta manera NUNCA se conecta la pista de audio local al elemento <video>
+ * eliminando por completo cualquier posibilidad de eco o autoescucha del micrófono.
+ */
+function attachLocalVideoOnly(stream) {
+  if (!localVideoComponent) return;
+  if (!stream) {
+    localVideoComponent.srcObject = null;
+    return;
+  }
+  const videoTracks = stream.getVideoTracks();
+  if (videoTracks.length > 0) {
+    localVideoComponent.srcObject = new MediaStream([videoTracks[0]]);
+  } else {
+    localVideoComponent.srcObject = null;
+  }
+  localVideoComponent.muted = true;
+  localVideoComponent.volume = 0;
+  localVideoComponent.playsInline = true;
+  localVideoComponent.play().catch(e => console.warn(e));
+}
+
 async function acquireLocalMedia() {
   if (localStream && localStream.active && localStream.getVideoTracks().length > 0) {
     return localStream;
   }
 
-  // Intento 1: Cámara web con cancelación de eco (ideal para celulares y portátiles)
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      },
-      video: {
-        facingMode: "user",
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }
-    });
-    console.log("[WebRTC] Cámara web y micrófono obtenidos con éxito (Intento 1).");
-    if (localVideoComponent) {
-      localVideoComponent.srcObject = localStream;
-      localVideoComponent.muted = true;
-      localVideoComponent.playsInline = true;
-      localVideoComponent.play().catch(e => console.warn(e));
-    }
-    hideNoCameraPlaceholder();
-    return localStream;
-  } catch (errVideo) {
-    console.warn("[WebRTC] Intento 1 falló (puede ser resolución de celular en vertical):", errVideo);
-  }
-
-  // Intento 2: Cámara básica sin restricciones dimensionales (indispensable para celulares)
+  // Intento 1: Cámara web frontal con cancelación de eco
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true
       },
+      video: {
+        facingMode: "user"
+      }
+    });
+    console.log("[WebRTC] Cámara web y micrófono obtenidos con éxito (Intento 1).");
+    attachLocalVideoOnly(localStream);
+    hideNoCameraPlaceholder();
+    return localStream;
+  } catch (errVideo) {
+    console.warn("[WebRTC] Intento 1 falló:", errVideo);
+  }
+
+  // Intento 2: Cámara y micrófono básicos (máxima compatibilidad en celulares Android / iOS)
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
       video: true
     });
     console.log("[WebRTC] Cámara y micrófono obtenidos con video básico (Intento 2).");
-    if (localVideoComponent) {
-      localVideoComponent.srcObject = localStream;
-      localVideoComponent.muted = true;
-      localVideoComponent.playsInline = true;
-      localVideoComponent.play().catch(e => console.warn(e));
-    }
+    attachLocalVideoOnly(localStream);
     hideNoCameraPlaceholder();
     return localStream;
   } catch (errBasic) {
@@ -260,8 +316,7 @@ async function acquireLocalMedia() {
   try {
     const audioStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
-        noiseSuppression: true
+        echoCancellation: true
       },
       video: false
     });
@@ -271,13 +326,7 @@ async function acquireLocalMedia() {
     localStream = audioStream;
     console.log("[WebRTC] PC de escritorio sin cámara: Micrófono real y video sintético adaptativo listos.");
 
-    if (localVideoComponent) {
-      localVideoComponent.srcObject = localStream;
-      localVideoComponent.muted = true;
-      localVideoComponent.playsInline = true;
-      localVideoComponent.play().catch(e => console.warn(e));
-    }
-
+    attachLocalVideoOnly(localStream);
     showNoCameraPlaceholder("Micrófono activo (PC sin cámara)");
     return localStream;
   } catch (errAudio) {
@@ -731,10 +780,12 @@ function stopCallTones() {
 // =============================================================================
 
 function initiateCall() {
+  // Asegurar desbloqueo de audio con el clic de usuario
+  unmuteRemoteAudio();
+
   showOutgoingModal();
   updateConnectionStatus("Llamando...", "active");
 
-  // Pre-cargar periféricos locales de forma asíncrona
   acquireLocalMedia().catch(e => console.warn(e));
 
   signaling.send({ type: 'call-request', target: currentTargetPeerId });
@@ -747,6 +798,9 @@ function handleIncomingCallRequest(sender, senderDevice) {
 }
 
 async function acceptIncomingCall() {
+  // Asegurar desbloqueo de audio con el clic de usuario
+  unmuteRemoteAudio();
+
   closeCallModal();
   updateConnectionStatus("Conectando...", "active");
   openVideoOverlay();
@@ -879,7 +933,6 @@ signaling.onmessage = async (data) => {
       updateLastMessagePreview(text, time || formatCurrentTime());
       playMessagePop();
 
-      // Si está en móvil y en la pantalla de lista, mostrar badge
       if (window.innerWidth <= 768) {
         const sidebar = document.getElementById('sidebar-panel');
         if (sidebar && !sidebar.classList.contains('hidden-mobile')) {
@@ -1044,6 +1097,11 @@ function resetCallState() {
 
   if (remoteVideoComponent) {
     remoteVideoComponent.srcObject = null;
+  }
+
+  const remoteAudio = document.getElementById('remote-audio');
+  if (remoteAudio) {
+    remoteAudio.srcObject = null;
   }
 
   const placeholder = document.getElementById('remote-placeholder');
