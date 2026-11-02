@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Sistema de Videollamada WebRTC - E.E.T. Nº 3139</title>
   
   <!-- Tipografía Google Fonts -->
@@ -43,15 +43,27 @@
     <!-- Contenedor principal requerido por la consigna del TP -->
     <div id="video-chat-container" class="video-position">
       
+      <!-- Cartel de guía paso a paso y botón para compartir enlace -->
+      <div id="helper-banner" class="helper-banner">
+        <span id="helper-text" class="helper-text">Paso 1: Comparte este enlace con tu compañera</span>
+        <button id="btn-copy-link" class="btn-copy-link" onclick="copyMeetingLink()" title="Copiar enlace para tu compañera">
+          <svg class="icon-svg" style="width: 13px; height: 13px;" viewBox="0 0 24 24">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+          <span id="btn-copy-label">Copiar enlace</span>
+        </button>
+      </div>
+
       <!-- Estado de espera para el video remoto -->
       <div id="remote-placeholder" class="remote-placeholder">
         <div class="avatar-icon">
-          <svg class="icon-svg" style="width: 40px; height: 40px;" viewBox="0 0 24 24">
+          <svg class="icon-svg" style="width: 36px; height: 36px;" viewBox="0 0 24 24">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
             <circle cx="12" cy="7" r="4"/>
           </svg>
         </div>
-        <p>Esperando conexión del par remoto...</p>
+        <p id="placeholder-text">Esperando que tu compañera abra el enlace...</p>
       </div>
 
       <!-- Video remoto principal con autoplay -->
@@ -84,11 +96,11 @@
         </button>
 
         <!-- Botón Iniciar Llamada -->
-        <button class="btn-control btn-start" onclick="start()" title="Establecer conexión con el par">
+        <button id="btn-start-call" class="btn-control btn-start" onclick="start()" title="Establecer conexión con el par">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
           </svg>
-          Iniciar llamada
+          <span id="btn-start-label">Llamar</span>
         </button>
 
         <!-- Botón Colgar / Desconectar -->
@@ -97,7 +109,7 @@
             <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
             <line x1="1" y1="1" x2="23" y2="23"/>
           </svg>
-          Colgar
+          <span id="btn-hangup-label">Colgar</span>
         </button>
 
         <!-- Botón Pantalla Completa -->
