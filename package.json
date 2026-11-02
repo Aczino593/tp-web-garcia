@@ -1,0 +1,19 @@
+{
+  "name": "tp-web-garcia",
+  "version": "1.0.0",
+  "description": "Trabajo Práctico WebRTC - Servidor de Señalización y Cliente P2P - E.E.T. Nº 3139",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aczino593/tp-web-garcia.git"
+  },
+  "author": "Aczino593",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

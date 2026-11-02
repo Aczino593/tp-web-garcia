@@ -128,8 +128,27 @@ pc.ontrack = (event) => {
 // =============================================================================
 // PROCESAMIENTO DE MENSAJES RECIBIDOS VÍA SEÑALIZACIÓN
 // =============================================================================
-signaling.onmessage = async ({ desc, candidate }) => {
+signaling.onmessage = async (data) => {
   try {
+    const { desc, candidate, type, peerId } = data;
+
+    // Mensaje de bienvenida del servidor
+    if (type === 'welcome') {
+      console.log(`[Signaling] Asignado como: ${peerId}`);
+      updateConnectionStatus(`Conectado (${peerId}) - Listo`, "active");
+      return;
+    }
+
+    // Notificación de desconexión del par remoto
+    if (type === 'peer-disconnected') {
+      console.log(`[Signaling] El par remoto ${peerId} se ha desconectado.`);
+      updateConnectionStatus("El par remoto se ha desconectado", "standby");
+      if (remoteVideoComponent) remoteVideoComponent.srcObject = null;
+      const placeholder = document.getElementById('remote-placeholder');
+      if (placeholder) placeholder.style.display = 'flex';
+      return;
+    }
+
     if (desc) {
       // Caso 1: Se recibe una Oferta SDP del par
       if (desc.type === 'offer') {
@@ -182,9 +201,11 @@ async function showVideoConference() {
     localVideoComponent.srcObject = localStream;
     updateConnectionStatus("Cámara preparada. Listo para conectar.", "standby");
 
-    // Conexión por WebSocket al servidor local (puerto estándar 3000)
-    const host = window.location.hostname || "localhost";
-    signaling.connect(`ws://${host}:3000`);
+    // Conexión dinámica por WebSocket al servidor de señalización
+    const isHttp = window.location.protocol.startsWith('http');
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = isHttp ? window.location.host : 'localhost:3000';
+    signaling.connect(`${wsProtocol}//${wsHost}`);
   } catch (err) {
     console.error("[WebRTC] Error al acceder a la cámara o micrófono:", err);
     updateConnectionStatus("Permiso de medios denegado", "error");
