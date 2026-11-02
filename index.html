@@ -46,7 +46,7 @@
       <!-- Estado de espera para el video remoto -->
       <div id="remote-placeholder" class="remote-placeholder">
         <div class="avatar-icon">
-          <svg class="icon-svg" style="width: 36px; height: 36px;" viewBox="0 0 24 24">
+          <svg class="icon-svg" style="width: 48px; height: 48px;" viewBox="0 0 24 24">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
             <circle cx="12" cy="7" r="4"/>
           </svg>
@@ -54,20 +54,20 @@
         <p id="placeholder-text">Esperando conexión...</p>
       </div>
 
-      <!-- Video remoto principal con autoplay -->
-      <video id="remote-video" autoplay="autoplay" playsinline></video>
+      <!-- Video remoto principal con autoplay y playsinline -->
+      <video id="remote-video" autoplay="autoplay" playsinline webkit-playsinline></video>
 
-      <!-- Video local (miniatura Picture-in-Picture) con autoplay y muted -->
+      <!-- Video local (miniatura Picture-in-Picture) con autoplay, muted y playsinline -->
       <div class="local-video-wrapper">
-        <video id="local-video" autoplay="autoplay" muted playsinline></video>
+        <video id="local-video" autoplay="autoplay" muted playsinline webkit-playsinline></video>
         <div id="no-camera-indicator" class="no-camera-indicator" style="display: none;">
-          <svg class="icon-svg" style="width: 28px; height: 28px; color: #10b981;" viewBox="0 0 24 24">
+          <svg class="icon-svg" style="width: 26px; height: 26px; color: #10b981;" viewBox="0 0 24 24">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
             <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
             <line x1="12" y1="19" x2="12" y2="23"/>
             <line x1="8" y1="23" x2="16" y2="23"/>
           </svg>
-          <span id="no-camera-label">Solo micrófono (Sin cámara)</span>
+          <span id="no-camera-label">Sin cámara</span>
         </div>
         <span class="local-video-label">Cámara local</span>
       </div>
@@ -92,8 +92,8 @@
           </svg>
         </button>
 
-        <!-- Botón Iniciar Llamada -->
-        <button id="btn-start-call" class="btn-control btn-start" onclick="start()" title="Establecer conexión con el par">
+        <!-- Botón Iniciar Llamada (Dispara el flujo estilo WhatsApp) -->
+        <button id="btn-start-call" class="btn-control btn-start" onclick="initiateCall()" title="Llamar al otro par">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
           </svg>
@@ -101,7 +101,7 @@
         </button>
 
         <!-- Botón Colgar / Desconectar -->
-        <button class="btn-control btn-hangup" onclick="hangUp()" title="Finalizar llamada en curso">
+        <button class="btn-control btn-hangup" onclick="hangUp()" title="Finalizar llamada">
           <svg class="icon-svg" viewBox="0 0 24 24">
             <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
             <line x1="1" y1="1" x2="23" y2="23"/>
@@ -119,6 +119,49 @@
 
     </div>
   </main>
+
+  <!-- Modal estilo WhatsApp para llamada entrante y saliente -->
+  <div id="call-modal" class="call-modal-overlay" style="display: none;">
+    <div class="call-modal-card">
+      <div class="call-modal-avatar">
+        <svg class="icon-svg" style="width: 44px; height: 44px;" viewBox="0 0 24 24">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+      </div>
+      <h2 id="call-modal-title">Llamada entrante</h2>
+      <p id="call-modal-subtitle">Videollamada WebRTC P2P</p>
+      
+      <!-- Opciones cuando te llaman (Atender / Rechazar) -->
+      <div id="incoming-actions" class="call-modal-actions">
+        <button class="btn-modal-action btn-accept" onclick="acceptIncomingCall()" title="Atender llamada">
+          <svg class="icon-svg" viewBox="0 0 24 24">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+          </svg>
+          <span>Atender</span>
+        </button>
+
+        <button class="btn-modal-action btn-reject" onclick="rejectIncomingCall()" title="Rechazar llamada">
+          <svg class="icon-svg" viewBox="0 0 24 24">
+            <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+          <span>Rechazar</span>
+        </button>
+      </div>
+
+      <!-- Opción cuando tú estás llamando (Cancelar) -->
+      <div id="outgoing-actions" class="call-modal-actions" style="display: none;">
+        <button class="btn-modal-action btn-reject" onclick="cancelOutgoingCall()" title="Cancelar llamada">
+          <svg class="icon-svg" viewBox="0 0 24 24">
+            <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+          <span>Cancelar</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Lógica WebRTC externa -->
   <script src="js/main.js"></script>
