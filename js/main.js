@@ -2,7 +2,7 @@
  * =============================================================================
  * TRABAJO PRÁCTICO WEBRTC - E.E.T. Nº 3139 “GRAL. MARTÍN M. DE GÜEMES”
  * Archivo: js/main.js
- * Descripción: Implementación completa estilo WhatsApp para videollamadas P2P
+ * Descripción: Implementación completa para videollamada P2P con soporte móvil y desktop
  * =============================================================================
  */
 
@@ -10,12 +10,13 @@
 var localVideoComponent;
 var remoteVideoComponent;
 var localStream = null;
+var remoteMediaStream = null;
 
-// Cola para almacenar candidatos ICE remotos recibidos antes de fijar la descripción remota
+// Cola para almacenar candidatos ICE recibidos antes de fijar la descripción remota
 let iceCandidatesQueue = [];
 
-// Estado de la llamada
-let isCallInitiator = false;
+// Temporizador para el video sintético de la PC
+let fallbackCanvasInterval = null;
 
 // Configuración de restricciones multimedia
 const mediaConstraints = {
@@ -27,11 +28,13 @@ const mediaConstraints = {
   }
 };
 
-// Servidores STUN públicos provistos por Google para NAT Traversal
+// Servidores STUN públicos y redundantes para asegurar conectividad NAT Traversal
 const iceServers = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' }
   ]
 };
 
@@ -40,7 +43,6 @@ let pc = null;
 
 /**
  * Crea o recupera la instancia activa de RTCPeerConnection.
- * Si fue cerrada previamente, genera una nueva limpia.
  */
 function getPeerConnection() {
   if (pc && pc.signalingState !== 'closed') {
@@ -50,18 +52,48 @@ function getPeerConnection() {
   console.log("[WebRTC] Creando nueva instancia RTCPeerConnection...");
   pc = new RTCPeerConnection(iceServers);
 
-  // 1. Detección y envío de candidatos ICE locales
+  // 1. Envío de candidatos ICE locales
   pc.onicecandidate = ({ candidate }) => {
-    if (candidate) {
+    if (candidate && candidate.candidate) {
       signaling.send({ candidate });
     }
   };
 
-  // 2. Recepción de flujo multimedia remoto
+  // 2. Monitoreo del estado de conexión P2P
+  pc.onconnectionstatechange = () => {
+    console.log("[WebRTC] connectionState:", pc.connectionState);
+    if (pc.connectionState === 'connected') {
+      updateConnectionStatus("En videollamada (En vivo)", "active");
+    } else if (pc.connectionState === 'failed') {
+      console.warn("[WebRTC] Conexión P2P fallida.");
+      updateConnectionStatus("Fallo de conexión P2P", "error");
+    }
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    console.log("[WebRTC] iceConnectionState:", pc.iceConnectionState);
+    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      updateConnectionStatus("En videollamada", "active");
+    }
+  };
+
+  // 3. Recepción de pistas de audio y video remotas
   pc.ontrack = (event) => {
     console.log("[WebRTC] Pista remota recibida:", event.track.kind);
-    const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
-    setupVideoElement(remoteVideoComponent, stream, false);
+
+    if (!remoteMediaStream) {
+      remoteMediaStream = new MediaStream();
+    }
+
+    // Agregar la pista al stream persistente (sin sobreescribir las anteriores)
+    const existing = remoteMediaStream.getTracks().find(t => t.kind === event.track.kind);
+    if (existing) {
+      remoteMediaStream.removeTrack(existing);
+    }
+    remoteMediaStream.addTrack(event.track);
+
+    // Asignar al elemento de video y forzar reproducción
+    setupRemoteVideoElement(remoteMediaStream);
 
     const placeholder = document.getElementById('remote-placeholder');
     if (placeholder) placeholder.style.display = 'none';
@@ -74,70 +106,133 @@ function getPeerConnection() {
 }
 
 /**
- * Configura y reproduce un elemento de video de forma segura para navegadores móviles y desktop
+ * Configura la reproducción remota manejando de forma segura las restricciones de autoplay
  */
-function setupVideoElement(videoEl, stream, isMuted) {
-  if (!videoEl) return;
-  videoEl.srcObject = stream;
-  videoEl.muted = isMuted;
-  videoEl.playsInline = true;
-  videoEl.setAttribute('playsinline', '');
-  videoEl.setAttribute('webkit-playsinline', '');
-  videoEl.play().catch(e => console.warn("[WebRTC] Error al reproducir video:", e));
+function setupRemoteVideoElement(stream) {
+  if (!remoteVideoComponent) return;
+
+  remoteVideoComponent.srcObject = stream;
+  remoteVideoComponent.playsInline = true;
+  remoteVideoComponent.setAttribute('playsinline', '');
+  remoteVideoComponent.setAttribute('webkit-playsinline', '');
+
+  // Intento 1: Reproducir con sonido habilitado
+  remoteVideoComponent.muted = false;
+  remoteVideoComponent.play().then(() => {
+    console.log("[WebRTC] Reproducción remota activa con sonido.");
+    hideUnmuteBanner();
+  }).catch((err) => {
+    console.warn("[WebRTC] Autoplay con audio restringido por el navegador. Reproduciendo video silenciado...", err);
+    // Intento 2: Si el navegador bloqueó el audio, silenciar temporalmente para QUE EL VIDEO SE MUESTRE
+    remoteVideoComponent.muted = true;
+    remoteVideoComponent.play().then(() => {
+      console.log("[WebRTC] Video remoto visible. Mostrando aviso para activar sonido.");
+      showUnmuteBanner();
+      // Cualquier clic en la pantalla activará el sonido automáticamente
+      document.addEventListener('click', unmuteRemoteAudio, { once: true });
+    }).catch(e => console.error("[WebRTC] Error fatal al reproducir video:", e));
+  });
+}
+
+/**
+ * Desbloquea el sonido del video remoto cuando el usuario interactúa
+ */
+function unmuteRemoteAudio() {
+  if (remoteVideoComponent) {
+    remoteVideoComponent.muted = false;
+    remoteVideoComponent.play().catch(e => console.warn(e));
+  }
+  hideUnmuteBanner();
+  console.log("[WebRTC] Audio remoto activado por el usuario.");
+}
+
+function showUnmuteBanner() {
+  const banner = document.getElementById('unmute-banner');
+  if (banner) banner.style.display = 'flex';
+}
+
+function hideUnmuteBanner() {
+  const banner = document.getElementById('unmute-banner');
+  if (banner) banner.style.display = 'none';
 }
 
 // =============================================================================
-// GESTIÓN DE PERIFÉRICOS CON VIDEO SINTÉTICO PARA PC SIN WEBCAM
+// GESTIÓN DE PERIFÉRICOS CON VIDEO SINTÉTICO ACTIVO
 // =============================================================================
 
 /**
- * Genera un video sintético ligero (Canvas) para computadoras que no tienen cámara física.
- * Esto asegura que la PC siempre envíe una pista de video y que el celular la reciba sin errores.
+ * Genera un video sintético ligero con animación continua (10 fps).
+ * Al generar fotogramas activos constantemente, el códec WebRTC siempre
+ * transmite video en vivo hacia el celular sin congelarse.
  */
 function createFallbackVideoTrack() {
   const canvas = document.createElement('canvas');
   canvas.width = 640;
   canvas.height = 480;
   const ctx = canvas.getContext('2d');
+  let angle = 0;
 
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  function draw() {
+    angle += 0.08;
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  ctx.fillStyle = '#1e293b';
-  ctx.beginPath();
-  ctx.arc(320, 200, 75, 0, Math.PI * 2);
-  ctx.fill();
+    // Anillo exterior animado
+    const pulse = Math.sin(angle) * 8;
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(320, 195, 76 + pulse, 0, Math.PI * 2);
+    ctx.stroke();
 
-  ctx.fillStyle = '#3b82f6';
-  ctx.beginPath();
-  ctx.arc(320, 180, 36, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(320, 275, 52, Math.PI, 0, false);
-  ctx.fill();
+    // Fondo avatar
+    ctx.fillStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.arc(320, 195, 70, 0, Math.PI * 2);
+    ctx.fill();
 
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = 'bold 20px Inter, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('PC (Solo Micrófono)', 320, 350);
+    // Ícono micrófono
+    ctx.fillStyle = '#10b981';
+    ctx.beginPath();
+    ctx.arc(320, 175, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(320, 265, 48, Math.PI, 0, false);
+    ctx.fill();
 
-  const stream = canvas.captureStream(5);
+    // Texto descriptivo
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 20px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('PC (Solo Micrófono)', 320, 350);
+  }
+
+  draw();
+  if (fallbackCanvasInterval) clearInterval(fallbackCanvasInterval);
+  fallbackCanvasInterval = setInterval(draw, 100);
+
+  const stream = canvas.captureStream(10);
   return stream.getVideoTracks()[0];
 }
 
 /**
- * Obtiene los dispositivos locales con fallback:
- * - Si tiene cámara (celular o notebook): usa cámara real y micrófono.
- * - Si no tiene cámara (PC de escritorio): usa micrófono real + pista de video sintética.
+ * Obtiene los dispositivos locales:
+ * - Con cámara (celular): cámara real frontal + micrófono.
+ * - Sin cámara (PC de escritorio): micrófono real + video sintético animado.
  */
 async function acquireLocalMedia() {
   if (localStream) return localStream;
 
-  // Intento 1: Cámara física y Micrófono
+  // Intento 1: Cámara web física y Micrófono
   try {
     localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
     console.log("[WebRTC] Cámara web y micrófono obtenidos con éxito.");
-    setupVideoElement(localVideoComponent, localStream, true);
+    if (localVideoComponent) {
+      localVideoComponent.srcObject = localStream;
+      localVideoComponent.muted = true;
+      localVideoComponent.playsInline = true;
+      localVideoComponent.play().catch(e => console.warn(e));
+    }
     hideNoCameraPlaceholder();
     return localStream;
   } catch (errVideo) {
@@ -152,7 +247,14 @@ async function acquireLocalMedia() {
 
     localStream = audioStream;
     console.log("[WebRTC] Micrófono y pista de video adaptativa listos.");
-    setupVideoElement(localVideoComponent, localStream, true);
+
+    if (localVideoComponent) {
+      localVideoComponent.srcObject = localStream;
+      localVideoComponent.muted = true;
+      localVideoComponent.playsInline = true;
+      localVideoComponent.play().catch(e => console.warn(e));
+    }
+
     showNoCameraPlaceholder("Micrófono activo (PC sin cámara)");
     return localStream;
   } catch (errAudio) {
@@ -186,7 +288,7 @@ function ensureLocalTracksAdded() {
       const alreadyAdded = senders.some(s => s.track && s.track.id === track.id);
       if (!alreadyAdded) {
         peer.addTrack(track, localStream);
-        console.log(`[WebRTC] Pista añadida al Peer: ${track.kind}`);
+        console.log(`[WebRTC] Pista agregada al Peer: ${track.kind}`);
       }
     });
   }
@@ -243,30 +345,17 @@ const signaling = {
 // GESTIÓN DEL FLUJO DE LLAMADA TIPO WHATSAPP
 // =============================================================================
 
-/**
- * El usuario presiona el botón principal "Llamar":
- * Muestra pantalla de llamada saliente y avisa al par mediante señalización.
- */
 function initiateCall() {
-  isCallInitiator = true;
   showOutgoingModal();
   signaling.send({ type: 'call-request' });
   updateConnectionStatus("Llamando...", "active");
 }
 
-/**
- * Se recibe una solicitud de llamada del par: Muestra modal de llamada entrante
- */
 function handleIncomingCallRequest() {
-  isCallInitiator = false;
   showIncomingModal();
   updateConnectionStatus("Llamada entrante...", "active");
 }
 
-/**
- * El usuario atiende la llamada entrante:
- * Cierra modal, avisa que aceptó y queda a la espera de la Oferta SDP
- */
 async function acceptIncomingCall() {
   closeCallModal();
   updateConnectionStatus("Conectando...", "active");
@@ -275,25 +364,18 @@ async function acceptIncomingCall() {
   signaling.send({ type: 'call-accepted' });
 }
 
-/**
- * El usuario rechaza la llamada entrante
- */
 function rejectIncomingCall() {
   closeCallModal();
   signaling.send({ type: 'call-rejected' });
   updateConnectionStatus("Llamada rechazada", "standby");
 }
 
-/**
- * El que llamó cancela la llamada antes de que atiendan
- */
 function cancelOutgoingCall() {
   closeCallModal();
   signaling.send({ type: 'call-cancelled' });
   updateConnectionStatus("Llamada cancelada", "standby");
 }
 
-// Modales de llamada
 function showIncomingModal() {
   const modal = document.getElementById('call-modal');
   const title = document.getElementById('call-modal-title');
@@ -316,7 +398,7 @@ function showOutgoingModal() {
   const outgoing = document.getElementById('outgoing-actions');
 
   if (title) title.innerText = "Llamando...";
-  if (subtitle) subtitle.innerText = "Esperando que atiendan...";
+  if (subtitle) subtitle.innerText = "Esperando respuesta...";
   if (incoming) incoming.style.display = 'none';
   if (outgoing) outgoing.style.display = 'flex';
   if (modal) modal.style.display = 'flex';
@@ -334,18 +416,16 @@ signaling.onmessage = async (data) => {
   try {
     const { desc, candidate, type, peerId } = data;
 
-    // 1. Mensajes del protocolo de llamada estilo WhatsApp
     if (type === 'call-request') {
       handleIncomingCallRequest();
       return;
     }
 
     if (type === 'call-accepted') {
-      console.log("[Signaling] El par aceptó la llamada. Iniciando negociación SDP...");
+      console.log("[Signaling] El par aceptó la llamada. Generando Oferta SDP...");
       closeCallModal();
-      updateConnectionStatus("Conectando...", "active");
+      updateConnectionStatus("Negociando...", "active");
 
-      // El llamador inicia la oferta SDP
       await acquireLocalMedia();
       const peer = getPeerConnection();
       ensureLocalTracksAdded();
@@ -371,22 +451,16 @@ signaling.onmessage = async (data) => {
     if (type === 'peer-disconnected') {
       closeCallModal();
       updateConnectionStatus("Par desconectado", "standby");
-      if (remoteVideoComponent) remoteVideoComponent.srcObject = null;
-      const placeholder = document.getElementById('remote-placeholder');
-      if (placeholder) placeholder.style.display = 'flex';
-      if (pc) {
-        pc.close();
-        pc = null;
-      }
+      resetCallState();
       return;
     }
 
-    // 2. Recepción de SDP (Oferta o Respuesta)
+    // Recepción de SDP
     if (desc) {
       const peer = getPeerConnection();
 
       if (desc.type === 'offer') {
-        console.log("[WebRTC] Oferta SDP recibida. Procesando respuesta...");
+        console.log("[WebRTC] Oferta SDP recibida. Generando Respuesta...");
         await acquireLocalMedia();
         ensureLocalTracksAdded();
 
@@ -404,11 +478,11 @@ signaling.onmessage = async (data) => {
         await drainIceQueue();
       }
 
-    // 3. Recepción de Candidato ICE
+    // Recepción de Candidato ICE
     } else if (candidate) {
       const peer = getPeerConnection();
       if (peer.remoteDescription && peer.remoteDescription.type) {
-        await peer.addIceCandidate(new RTCIceCandidate(candidate));
+        await peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.warn(e));
       } else {
         iceCandidatesQueue.push(candidate);
       }
@@ -418,9 +492,6 @@ signaling.onmessage = async (data) => {
   }
 };
 
-/**
- * Aplica los candidatos ICE acumulados en la cola tras fijar la descripción remota
- */
 async function drainIceQueue() {
   const peer = getPeerConnection();
   while (iceCandidatesQueue.length > 0) {
@@ -437,9 +508,6 @@ async function drainIceQueue() {
 // FUNCIONES DE CONTROL DE LA APLICACIÓN
 // =============================================================================
 
-/**
- * Inicializa la cámara o micrófono al cargar la página y conecta con el servidor
- */
 async function showVideoConference() {
   localVideoComponent = document.getElementById('local-video');
   remoteVideoComponent = document.getElementById('remote-video');
@@ -447,41 +515,40 @@ async function showVideoConference() {
   try {
     await acquireLocalMedia();
 
-    // Conexión dinámica por WebSocket
     const isHttp = window.location.protocol.startsWith('http');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = isHttp ? window.location.host : 'localhost:3000';
     signaling.connect(`${wsProtocol}//${wsHost}`);
   } catch (err) {
-    console.error("[WebRTC] Error durante la inicialización:", err);
+    console.error("[WebRTC] Error de inicio:", err);
     updateConnectionStatus("Error al iniciar", "error");
   }
 }
 
-/**
- * Cortar o finalizar la llamada activa
- */
 function hangUp() {
   closeCallModal();
+  resetCallState();
+  signaling.send({ type: 'call-cancelled' });
+  updateConnectionStatus("Llamada finalizada", "standby");
+}
+
+function resetCallState() {
+  hideUnmuteBanner();
 
   if (pc) {
     pc.close();
     pc = null;
   }
 
+  remoteMediaStream = null;
   if (remoteVideoComponent) {
     remoteVideoComponent.srcObject = null;
   }
 
   const placeholder = document.getElementById('remote-placeholder');
   if (placeholder) placeholder.style.display = 'flex';
-
-  updateConnectionStatus("Llamada finalizada", "standby");
 }
 
-/**
- * Alterna el silencio del micrófono
- */
 function toggleAudio() {
   if (!localStream) return;
   const audioTrack = localStream.getAudioTracks()[0];
@@ -492,9 +559,6 @@ function toggleAudio() {
   }
 }
 
-/**
- * Alterna la activación/pausa de la cámara de video
- */
 function toggleVideo() {
   if (!localStream) return;
   const videoTrack = localStream.getVideoTracks()[0];
@@ -505,9 +569,6 @@ function toggleVideo() {
   }
 }
 
-/**
- * Alterna el modo pantalla completa del contenedor principal
- */
 function toggleFullScreen() {
   const elem = document.getElementById('video-chat-container');
   if (!document.fullscreenElement) {
@@ -517,9 +578,6 @@ function toggleFullScreen() {
   }
 }
 
-/**
- * Actualiza la insignia de estado en la barra superior
- */
 function updateConnectionStatus(message, state) {
   const text = document.getElementById('status-text');
   const dot = document.getElementById('status-dot');
@@ -531,5 +589,5 @@ function updateConnectionStatus(message, state) {
   }
 }
 
-// Inicialización automática al cargar el documento
+// Inicialización automática
 window.addEventListener('DOMContentLoaded', showVideoConference);
